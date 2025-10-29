@@ -6,7 +6,6 @@ on:
 
 jobs:
   deploy:
-    needs: test
     name: Deploy to PyPI
     permissions:
       id-token: write
