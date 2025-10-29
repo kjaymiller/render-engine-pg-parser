@@ -1,21 +1,24 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+requires = ["setuptools>=45", "setuptools_scm", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-dependencies = [
-  "psycopg[binary]>=3.0",
-  "render-engine[cli]>=2025.10.2a1",
-  "python-frontmatter>=1.0",
-]
-
 name = "render-engine-pg"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A PostgreSQL parser for the Render Engine"
 requires-python = ">=3.10"
+dependencies = [
+  "psycopg[binary]>=3.0",
+  "render-engine>=2025.10.2a1",
+  "python-frontmatter>=1.0",
+  "render-engine-markdown>=2023.12.1",
+]
 
 [project.optional-dependencies]
 test = ["pytest>=7.0", "pytest-mock>=3.10"]
 
 [tool.setuptools.packages.find]
 include = ["render_engine_pg"]
+
+[tool.setuptools_scm]
+local_scheme = "no-local-version"

@@ -6,15 +6,9 @@ class PGPage(Page):
 
     def __init__(self, *args, **kwargs):
         # Extract Page-specific arguments
-        page_kwargs = {
-            k: v for k, v in kwargs.items()
-            if k in ('content_path', 'content', 'Parser')
-        }
-        # Initialize parent Page with valid arguments
-        super().__init__(**page_kwargs)
-
         # Attach remaining kwargs as attributes
         for key, value in kwargs.items():
-            if key not in page_kwargs:
-                setattr(self, key, value)
+            setattr(self, key, value)
 
+    def render(self, route: str | Path, theme_manager: ThemeManager) -> int:
+        super().render(route=route, theme_manager=theme_manager)

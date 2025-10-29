@@ -35,5 +35,11 @@ class PostgresContentManager(ContentManager):
     @property
     def pages(self) -> Iterable:
         if self._pages is None:
-            self._pages = list(self.execute_query())
+            self._pages = []
+            for page in self.execute_query():
+                page.content = self.collection.Parser.parse(page.content)
+                self._pages.append(page)
         yield from self._pages
+
+    def __iter__(self):
+        yield from self.pages
