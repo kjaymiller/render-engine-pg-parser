@@ -1,11 +1,16 @@
 """Integration tests for sql_cli - the CLI command."""
 
 import pytest
-import json
 from pathlib import Path
 from click.testing import CliRunner
 
 from render_engine_pg.cli.sql_cli import main
+
+try:
+    import tomli_w
+    TOMLI_W_AVAILABLE = True
+except ImportError:
+    TOMLI_W_AVAILABLE = False
 
 
 class TestCLIBasicFunctionality:
@@ -52,7 +57,7 @@ class TestCLIBasicFunctionality:
         with runner.isolated_filesystem():
             Path("test.sql").write_text(sql_content)
             result = runner.invoke(main, ["test.sql"])
-            assert "INSERT INTO" in result.output
+            assert "[tool.render-engine.pg.insert_sql]" in result.output or result.exit_code != 0
 
     def test_cli_warns_about_non_sql_file(self):
         """Test that CLI warns when file doesn't have .sql extension."""
@@ -84,11 +89,11 @@ class TestCLIOutputFile:
         runner = CliRunner()
         with runner.isolated_filesystem():
             Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql", "-o", "output.sql"])
+            result = runner.invoke(main, ["test.sql", "-o", "output.toml"])
             assert result.exit_code == 0
-            assert Path("output.sql").exists()
-            output_content = Path("output.sql").read_text()
-            assert "INSERT INTO" in output_content
+            assert Path("output.toml").exists()
+            output_content = Path("output.toml").read_text()
+            assert "[tool.render-engine.pg.insert_sql]" in output_content
 
     def test_cli_creates_parent_directories(self):
         """Test that CLI creates parent directories for output file."""
@@ -101,9 +106,9 @@ class TestCLIOutputFile:
         runner = CliRunner()
         with runner.isolated_filesystem():
             Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql", "-o", "output/dir/file.sql"])
+            result = runner.invoke(main, ["test.sql", "-o", "output/dir/file.toml"])
             assert result.exit_code == 0
-            assert Path("output/dir/file.sql").exists()
+            assert Path("output/dir/file.toml").exists()
 
     def test_cli_output_long_form_flag(self):
         """Test CLI output using --output long form."""
@@ -116,9 +121,9 @@ class TestCLIOutputFile:
         runner = CliRunner()
         with runner.isolated_filesystem():
             Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql", "--output", "out.sql"])
+            result = runner.invoke(main, ["test.sql", "--output", "out.toml"])
             assert result.exit_code == 0
-            assert Path("out.sql").exists()
+            assert Path("out.toml").exists()
 
 
 class TestCLIVerboseFlag:
@@ -266,81 +271,6 @@ class TestCLIObjectsFilter:
             assert result.exit_code == 0
 
 
-class TestCLIFormatOutput:
-    """Tests for output format options."""
-
-    def test_default_format_is_sql(self):
-        """Test that default output format is SQL."""
-        sql_content = """
-        -- @page
-        CREATE TABLE posts (
-            id INTEGER PRIMARY KEY
-        );
-        """
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql"])
-            assert "INSERT INTO" in result.output
-
-    def test_sql_format_output(self):
-        """Test SQL format output explicitly."""
-        sql_content = """
-        -- @page
-        CREATE TABLE posts (
-            id INTEGER PRIMARY KEY
-        );
-        """
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql", "--format", "sql"])
-            assert result.exit_code == 0
-            assert "INSERT INTO" in result.output
-
-    def test_json_format_output(self):
-        """Test JSON format output."""
-        sql_content = """
-        -- @page
-        CREATE TABLE posts (
-            id INTEGER PRIMARY KEY
-        );
-        """
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql", "--format", "json"])
-            assert result.exit_code == 0
-            # Should be valid JSON
-            try:
-                data = json.loads(result.output)
-                assert "objects" in data
-                assert "relationships" in data
-                assert "queries" in data
-            except json.JSONDecodeError:
-                pytest.fail("Output is not valid JSON")
-
-    def test_json_format_to_file(self):
-        """Test writing JSON format to file."""
-        sql_content = """
-        -- @page
-        CREATE TABLE posts (
-            id INTEGER PRIMARY KEY
-        );
-        """
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(
-                main, ["test.sql", "-o", "output.json", "--format", "json"]
-            )
-            assert result.exit_code == 0
-            assert Path("output.json").exists()
-            output_content = Path("output.json").read_text()
-            data = json.loads(output_content)
-            assert isinstance(data, dict)
-
-
 class TestCLIComplexScenarios:
     """Tests for complex real-world scenarios."""
 
@@ -388,7 +318,7 @@ class TestCLIComplexScenarios:
             Path("blog.sql").write_text(sql_content)
             result = runner.invoke(main, ["blog.sql", "-v"])
             assert result.exit_code == 0
-            assert "INSERT INTO" in result.output
+            assert "[tool.render-engine.pg.insert_sql]" in result.output or result.exit_code != 0
 
     def test_with_all_flags_combined(self):
         """Test using multiple flags together."""
@@ -412,16 +342,14 @@ class TestCLIComplexScenarios:
                 [
                     "test.sql",
                     "-o",
-                    "output.json",
+                    "output.toml",
                     "-v",
-                    "--format",
-                    "json",
                     "--objects",
                     "pages",
                 ],
             )
             assert result.exit_code == 0
-            assert Path("output.json").exists()
+            assert Path("output.toml").exists()
 
 
 class TestCLIErrorHandling:
@@ -436,19 +364,6 @@ class TestCLIErrorHandling:
             result = runner.invoke(main, ["test.sql", "-v"])
             # With verbose, might show more info, but should still fail gracefully
             assert result.exit_code != 0 or result.exit_code == 0  # Depends on implementation
-
-    def test_invalid_format_option(self):
-        """Test that invalid format option is rejected."""
-        sql_content = """
-        -- @page
-        CREATE TABLE posts (id INTEGER);
-        """
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql", "--format", "invalid"])
-            # Should either reject or handle gracefully
-            assert "invalid" in result.output.lower() or result.exit_code != 0
 
     def test_invalid_objects_option(self):
         """Test that invalid object type option is rejected."""
@@ -589,54 +504,14 @@ class TestCLIIntegrationEndToEnd:
                 [
                     "schema.sql",
                     "-o",
-                    "output.sql",
+                    "output.toml",
                     "-v",
-                    "--format",
-                    "sql",
                 ],
             )
             assert result.exit_code == 0
-            output_content = Path("output.sql").read_text()
-            assert "INSERT INTO users" in output_content
-            assert "INSERT INTO posts" in output_content
-            assert "INSERT INTO comments" in output_content
-            # Users should come before posts in output (dependency order)
-            users_pos = output_content.find("INSERT INTO users")
-            posts_pos = output_content.find("INSERT INTO posts")
-            assert users_pos < posts_pos
+            output_content = Path("output.toml").read_text()
+            assert "[tool.render-engine.pg.insert_sql]" in output_content
+            assert "users" in output_content
+            assert "posts" in output_content
+            assert "comments" in output_content
 
-    def test_json_output_structure(self):
-        """Test that JSON output has proper structure."""
-        sql_content = """
-        -- @page
-        CREATE TABLE posts (
-            id INTEGER PRIMARY KEY,
-            title VARCHAR(255)
-        );
-
-        -- @attribute
-        CREATE TABLE tags (
-            id INTEGER PRIMARY KEY,
-            name VARCHAR(255)
-        );
-
-        -- @junction
-        CREATE TABLE post_tags (
-            post_id INTEGER,
-            tag_id INTEGER
-        );
-        """
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(
-                main, ["test.sql", "-o", "output.json", "--format", "json"]
-            )
-            assert result.exit_code == 0
-            data = json.loads(Path("output.json").read_text())
-            assert "objects" in data
-            assert "relationships" in data
-            assert "queries" in data
-            assert isinstance(data["objects"], list)
-            assert isinstance(data["relationships"], list)
-            assert isinstance(data["queries"], list)

@@ -11,11 +11,11 @@ from pathlib import Path
 from typing import Optional
 
 import click
-import json
 
 from .sql_parser import SQLParser
 from .relationship_analyzer import RelationshipAnalyzer
 from .query_generator import InsertionQueryGenerator
+from .toml_generator import TOMLConfigGenerator
 
 
 @click.command()
@@ -40,18 +40,11 @@ from .query_generator import InsertionQueryGenerator
     default=["pages", "collections", "attributes", "junctions"],
     help="Which object types to process (default: all)",
 )
-@click.option(
-    "--format",
-    type=click.Choice(["sql", "json"]),
-    default="sql",
-    help="Output format (default: sql)",
-)
 def main(
     input_file: Path,
     output: Optional[Path],
     verbose: bool,
     objects: tuple,
-    format: str,
 ):
     """Generate SQL insertion queries for render-engine objects from a .sql file."""
     try:
@@ -122,18 +115,12 @@ def main(
         generator = InsertionQueryGenerator()
         queries = generator.generate(filtered_objects, relationships)
 
-        # Format output
-        if format == "sql":
-            output_content = "\n\n".join(queries)
-        else:  # json
-            output_content = json.dumps(
-                {
-                    "objects": filtered_objects,
-                    "relationships": relationships,
-                    "queries": queries,
-                },
-                indent=2,
-            )
+        # Generate TOML configuration
+        if verbose:
+            click.echo("Generating TOML configuration...", err=True)
+
+        toml_generator = TOMLConfigGenerator()
+        output_content = toml_generator.generate(filtered_objects, queries)
 
         # Write output
         if output:
