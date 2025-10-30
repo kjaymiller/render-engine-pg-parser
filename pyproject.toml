@@ -12,6 +12,7 @@ dependencies = [
   "render-engine>=2025.10.2a1",
   "python-frontmatter>=1.0",
   "render-engine-markdown>=2023.12.1",
+  "click>=8.3.0",
 ]
 
 [project.optional-dependencies]
@@ -19,6 +20,9 @@ test = ["pytest>=7.0", "pytest-mock>=3.10"]
 
 [tool.setuptools.packages.find]
 include = ["render_engine_pg"]
+
+[project.scripts]
+render-engine-pg = "render_engine_pg.cli.sql_cli:main"
 
 [tool.setuptools_scm]
 local_scheme = "no-local-version"
