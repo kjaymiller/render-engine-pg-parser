@@ -13,7 +13,7 @@ class InsertionQueryGenerator:
         self,
         objects: List[Dict[str, Any]],
         relationships: List[Dict[str, Any]],
-    ) -> List[str]:
+    ) -> tuple:
         """
         Generate insertion queries for objects considering relationships.
 
@@ -22,7 +22,7 @@ class InsertionQueryGenerator:
             relationships: List of relationships between objects
 
         Returns:
-            List of SQL insertion query strings (in proper order)
+            Tuple of (ordered_objects, queries) - both in proper dependency order
         """
         queries = []
 
@@ -34,7 +34,7 @@ class InsertionQueryGenerator:
             if query:
                 queries.append(query)
 
-        return queries
+        return ordered_objects, queries
 
     def _order_by_dependencies(
         self,

@@ -15,15 +15,17 @@ class TOMLConfigGenerator:
 
     def generate(
         self,
-        objects: List[Dict[str, Any]],
-        queries: List[str],
+        ordered_objects: List[Dict[str, Any]],
+        insert_queries: List[str],
+        read_queries: Dict[str, str] = None,
     ) -> str:
         """
-        Generate TOML configuration with insert_sql statements.
+        Generate TOML configuration with insert_sql and read_sql statements.
 
         Args:
-            objects: List of parsed objects (to get collection names)
-            queries: List of SQL insertion queries
+            ordered_objects: List of parsed objects in dependency order
+            insert_queries: List of SQL insertion queries (matching ordered_objects)
+            read_queries: Dictionary mapping object names to read queries
 
         Returns:
             TOML configuration string
@@ -37,17 +39,22 @@ class TOMLConfigGenerator:
         # Group queries by object name, removing comments and linebreaks
         insert_sql = {}
 
-        for i, obj in enumerate(objects):
-            if i < len(queries):
+        for i, obj in enumerate(ordered_objects):
+            if i < len(insert_queries):
                 obj_name = obj["name"]
                 # Remove comment lines (lines starting with --)
                 query_lines = [
-                    line for line in queries[i].split('\n')
+                    line for line in insert_queries[i].split('\n')
                     if not line.strip().startswith('--')
                 ]
                 # Join lines without linebreaks and clean up whitespace
                 clean_query = ' '.join(line.strip() for line in query_lines if line.strip())
                 insert_sql[obj_name] = clean_query
+
+        # Process read queries if provided
+        read_sql = {}
+        if read_queries:
+            read_sql = read_queries
 
         # Create TOML structure
         config = {
@@ -59,6 +66,10 @@ class TOMLConfigGenerator:
                 }
             }
         }
+
+        # Add read_sql if available
+        if read_sql:
+            config["tool"]["render-engine"]["pg"]["read_sql"] = read_sql
 
         # Generate TOML format
         return tomli_w.dumps(config)

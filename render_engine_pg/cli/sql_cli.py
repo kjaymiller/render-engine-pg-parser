@@ -15,6 +15,7 @@ import click
 from .sql_parser import SQLParser
 from .relationship_analyzer import RelationshipAnalyzer
 from .query_generator import InsertionQueryGenerator
+from .read_query_generator import ReadQueryGenerator
 from .toml_generator import TOMLConfigGenerator
 
 
@@ -108,19 +109,26 @@ def main(
                 err=True,
             )
 
-        # Generate queries
+        # Generate insertion queries
         if verbose:
             click.echo("Generating insertion queries...", err=True)
 
-        generator = InsertionQueryGenerator()
-        queries = generator.generate(filtered_objects, relationships)
+        insert_generator = InsertionQueryGenerator()
+        ordered_objects, insert_queries = insert_generator.generate(filtered_objects, relationships)
+
+        # Generate read queries
+        if verbose:
+            click.echo("Generating read queries...", err=True)
+
+        read_generator = ReadQueryGenerator()
+        read_queries = read_generator.generate(filtered_objects, relationships)
 
         # Generate TOML configuration
         if verbose:
             click.echo("Generating TOML configuration...", err=True)
 
         toml_generator = TOMLConfigGenerator()
-        output_content = toml_generator.generate(filtered_objects, queries)
+        output_content = toml_generator.generate(ordered_objects, insert_queries, read_queries)
 
         # Write output
         if output:

@@ -22,7 +22,7 @@ class TestBasicQueryGeneration:
         relationships = []
 
         generator = InsertionQueryGenerator()
-        queries = generator.generate(objects, relationships)
+        ordered_objects, queries = generator.generate(objects, relationships)
 
         assert len(queries) == 1
         assert "INSERT INTO users" in queries[0]
@@ -45,7 +45,7 @@ class TestBasicQueryGeneration:
         relationships = []
 
         generator = InsertionQueryGenerator()
-        queries = generator.generate(objects, relationships)
+        ordered_objects, queries = generator.generate(objects, relationships)
 
         assert "-- Insert Page: users" in queries[0]
 
@@ -70,7 +70,7 @@ class TestBasicQueryGeneration:
         relationships = []
 
         generator = InsertionQueryGenerator()
-        queries = generator.generate(objects, relationships)
+        ordered_objects, queries = generator.generate(objects, relationships)
 
         assert len(queries) == 2
 
@@ -107,7 +107,7 @@ class TestForeignKeyPlaceholders:
         ]
 
         generator = InsertionQueryGenerator()
-        queries = generator.generate(objects, relationships)
+        ordered_objects, queries = generator.generate(objects, relationships)
 
         # Find the posts query (not the users query)
         posts_query = next(q for q in queries if "posts" in q)
@@ -156,7 +156,7 @@ class TestForeignKeyPlaceholders:
         ]
 
         generator = InsertionQueryGenerator()
-        queries = generator.generate(objects, relationships)
+        ordered_objects, queries = generator.generate(objects, relationships)
 
         comments_query = next(q for q in queries if "comments" in q)
         # Should have FK placeholders
@@ -196,7 +196,7 @@ class TestDependencyOrdering:
         ]
 
         generator = InsertionQueryGenerator()
-        queries = generator.generate(objects, relationships)
+        ordered_objects, queries = generator.generate(objects, relationships)
 
         # Users should be inserted before posts
         users_idx = next(i for i, q in enumerate(queries) if "users" in q)
@@ -286,7 +286,7 @@ class TestDependencyOrdering:
         ]
 
         generator = InsertionQueryGenerator()
-        queries = generator.generate(objects, relationships)
+        ordered_objects, queries = generator.generate(objects, relationships)
 
         # Order should be c, b, a
         c_idx = next(i for i, q in enumerate(queries) if " c " in q or "table c" in q or "c (" in q)
@@ -315,7 +315,7 @@ class TestDependencyOrdering:
         relationships = []
 
         generator = InsertionQueryGenerator()
-        queries = generator.generate(objects, relationships)
+        ordered_objects, queries = generator.generate(objects, relationships)
 
         # Both objects should be present, order doesn't matter
         assert len(queries) == 2
@@ -355,7 +355,7 @@ class TestManyToManyRelationships:
         ]
 
         generator = InsertionQueryGenerator()
-        queries = generator.generate(objects, relationships)
+        ordered_objects, queries = generator.generate(objects, relationships)
 
         # Tags should be inserted before posts (attribute dependency)
         tags_idx = next(i for i, q in enumerate(queries) if "tags" in q)
@@ -380,7 +380,7 @@ class TestQueryFormat:
         relationships = []
 
         generator = InsertionQueryGenerator()
-        queries = generator.generate(objects, relationships)
+        ordered_objects, queries = generator.generate(objects, relationships)
 
         query = queries[0]
         # Should contain standard SQL INSERT INTO format
@@ -404,7 +404,7 @@ class TestQueryFormat:
         relationships = []
 
         generator = InsertionQueryGenerator()
-        queries = generator.generate(objects, relationships)
+        ordered_objects, queries = generator.generate(objects, relationships)
 
         query = queries[0]
         # Should have columns in order
@@ -424,7 +424,7 @@ class TestQueryFormat:
         relationships = []
 
         generator = InsertionQueryGenerator()
-        queries = generator.generate(objects, relationships)
+        ordered_objects, queries = generator.generate(objects, relationships)
 
         query = queries[0]
         # Placeholders should be in {column} format
@@ -441,7 +441,7 @@ class TestEdgeCases:
         relationships = []
 
         generator = InsertionQueryGenerator()
-        queries = generator.generate(objects, relationships)
+        ordered_objects, queries = generator.generate(objects, relationships)
 
         assert queries == []
 
@@ -459,7 +459,7 @@ class TestEdgeCases:
         relationships = []
 
         generator = InsertionQueryGenerator()
-        queries = generator.generate(objects, relationships)
+        ordered_objects, queries = generator.generate(objects, relationships)
 
         # Should handle gracefully, might skip or generate empty insert
         assert isinstance(queries, list)
@@ -478,7 +478,7 @@ class TestEdgeCases:
         relationships = []
 
         generator = InsertionQueryGenerator()
-        queries = generator.generate(objects, relationships)
+        ordered_objects, queries = generator.generate(objects, relationships)
 
         assert len(queries) == 1
         assert "{id}" in queries[0]
@@ -504,7 +504,7 @@ class TestEdgeCases:
         relationships = []
 
         generator = InsertionQueryGenerator()
-        queries = generator.generate(objects, relationships)
+        ordered_objects, queries = generator.generate(objects, relationships)
 
         # Check proper capitalization in comments
         assert any("Page" in q for q in queries)
@@ -524,7 +524,7 @@ class TestEdgeCases:
         relationships = []
 
         generator = InsertionQueryGenerator()
-        queries = generator.generate(objects, relationships)
+        ordered_objects, queries = generator.generate(objects, relationships)
 
         assert len(queries) == 1
         assert "{first_name}" in queries[0]
@@ -545,7 +545,7 @@ class TestEdgeCases:
         relationships = []
 
         generator = InsertionQueryGenerator()
-        queries = generator.generate(objects, relationships)
+        ordered_objects, queries = generator.generate(objects, relationships)
 
         # Should treat author_id as regular column, not FK
         assert "{author_id}" in queries[0]
@@ -604,7 +604,7 @@ class TestComplexScenarios:
         ]
 
         generator = InsertionQueryGenerator()
-        queries = generator.generate(objects, relationships)
+        ordered_objects, queries = generator.generate(objects, relationships)
 
         assert len(queries) == 4
         # Verify all tables are present
@@ -656,7 +656,7 @@ class TestComplexScenarios:
         ]
 
         generator = InsertionQueryGenerator()
-        queries = generator.generate(objects, relationships)
+        ordered_objects, queries = generator.generate(objects, relationships)
 
         # Verify categories is before products
         cat_idx = next(i for i, q in enumerate(queries) if "categories" in q)
