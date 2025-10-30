@@ -21,6 +21,7 @@ class TOMLConfigGenerator:
     ) -> str:
         """
         Generate TOML configuration with insert_sql and read_sql statements.
+        Groups all queries by the main collection/page, with supporting queries in order.
 
         Args:
             ordered_objects: List of parsed objects in dependency order
@@ -36,12 +37,27 @@ class TOMLConfigGenerator:
                 "Install it with: pip install tomli_w"
             )
 
-        # Group queries by object name, removing comments and linebreaks
-        insert_sql = {}
+        # Find the main object (page or collection, prioritize collection)
+        main_obj = None
+        main_obj_idx = None
 
         for i, obj in enumerate(ordered_objects):
+            obj_type = obj["type"].lower()
+            if obj_type in ("page", "collection"):
+                main_obj = obj
+                main_obj_idx = i
+                if obj_type == "collection":
+                    break  # Prefer collection
+
+        if not main_obj:
+            # Fallback to first object if no page/collection found
+            main_obj = ordered_objects[0]
+            main_obj_idx = 0
+
+        # Collect all insert queries in dependency order
+        all_insert_queries = []
+        for i, obj in enumerate(ordered_objects):
             if i < len(insert_queries):
-                obj_name = obj["name"]
                 # Remove comment lines (lines starting with --)
                 query_lines = [
                     line for line in insert_queries[i].split('\n')
@@ -49,27 +65,29 @@ class TOMLConfigGenerator:
                 ]
                 # Join lines without linebreaks and clean up whitespace
                 clean_query = ' '.join(line.strip() for line in query_lines if line.strip())
-                insert_sql[obj_name] = clean_query
+                all_insert_queries.append(clean_query)
 
-        # Process read queries if provided
-        read_sql = {}
-        if read_queries:
-            read_sql = read_queries
+        # Create TOML structure with main object as key
+        main_obj_name = main_obj["name"]
 
-        # Create TOML structure
+        # Build the main object config
+        pg_config = {
+            "insert_sql": all_insert_queries,
+        }
+
+        # Add read query for main object if available
+        if read_queries and main_obj_name in read_queries:
+            pg_config["read_sql"] = read_queries[main_obj_name]
+
         config = {
             "tool": {
                 "render-engine": {
                     "pg": {
-                        "insert_sql": insert_sql,
+                        main_obj_name: pg_config
                     }
                 }
             }
         }
-
-        # Add read_sql if available
-        if read_sql:
-            config["tool"]["render-engine"]["pg"]["read_sql"] = read_sql
 
         # Generate TOML format
         return tomli_w.dumps(config)
