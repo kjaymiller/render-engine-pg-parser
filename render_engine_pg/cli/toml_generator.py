@@ -39,20 +39,19 @@ class TOMLConfigGenerator:
 
         # Find the main object (page or collection, prioritize collection)
         main_obj = None
-        main_obj_idx = None
 
         for i, obj in enumerate(ordered_objects):
             obj_type = obj["type"].lower()
             if obj_type in ("page", "collection"):
                 main_obj = obj
-                main_obj_idx = i
                 if obj_type == "collection":
                     break  # Prefer collection
 
         if not main_obj:
             # Fallback to first object if no page/collection found
             main_obj = ordered_objects[0]
-            main_obj_idx = 0
+
+        main_obj_name = main_obj["name"]
 
         # Collect all insert queries in dependency order
         all_insert_queries = []
@@ -67,27 +66,28 @@ class TOMLConfigGenerator:
                 clean_query = ' '.join(line.strip() for line in query_lines if line.strip())
                 all_insert_queries.append(clean_query)
 
-        # Create TOML structure with main object as key
-        main_obj_name = main_obj["name"]
+        # Build insert_sql dictionary with main object as key
+        insert_sql_dict = {main_obj_name: all_insert_queries}
 
-        # Build the main object config
-        pg_config = {
-            "insert_sql": all_insert_queries,
-        }
-
-        # Add read query for main object if available
+        # Build read_sql dictionary with main object as key
+        read_sql_dict = {}
         if read_queries and main_obj_name in read_queries:
-            pg_config["read_sql"] = read_queries[main_obj_name]
+            read_sql_dict[main_obj_name] = read_queries[main_obj_name]
 
+        # Create TOML structure: tool.render-engine.pg with insert_sql and read_sql
         config = {
             "tool": {
                 "render-engine": {
                     "pg": {
-                        main_obj_name: pg_config
+                        "insert_sql": insert_sql_dict,
                     }
                 }
             }
         }
+
+        # Add read_sql if available
+        if read_sql_dict:
+            config["tool"]["render-engine"]["pg"]["read_sql"] = read_sql_dict
 
         # Generate TOML format
         return tomli_w.dumps(config)
