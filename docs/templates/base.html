@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{{ title }} - {{ SITE_TITLE }}{% endblock %}</title>
+    <meta name="description" content="{% block description %}{{ SITE_DESCRIPTION }}{% endblock %}">
+    <link rel="stylesheet" href="/static/css/style.css">
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <a href="/" class="nav-logo">render-engine-pg</a>
+            <ul class="nav-menu">
+                <li><a href="/" class="nav-link">Home</a></li>
+                <li><a href="/docs/overview/" class="nav-link">Docs</a></li>
+                <li><a href="#" class="nav-link">GitHub</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="content-wrapper">
+        {% block sidebar %}
+        <aside class="sidebar">
+            <div class="sidebar-section">
+                <h3>Documentation</h3>
+                <ul>
+                    <li><a href="/docs/overview/">Overview</a></li>
+                    <li><a href="/docs/configuration/">Configuration</a></li>
+                    <li><a href="/docs/usage/">Usage Guide</a></li>
+                    <li><a href="/docs/api-reference/">API Reference</a></li>
+                </ul>
+            </div>
+        </aside>
+        {% endblock %}
+
+        <main class="main-content">
+            {% block content %}
+            <article class="doc-article">
+                <h1>{{ title }}</h1>
+                {{ content }}
+            </article>
+            {% endblock %}
+        </main>
+    </div>
+
+    <footer class="footer">
+        <div class="footer-content">
+            <p>&copy; 2024 render-engine-pg Documentation</p>
+            <p>Built with <a href="https://render-engine.io">render-engine</a></p>
+        </div>
+    </footer>
+
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>

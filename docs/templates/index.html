@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block sidebar %}
+<!-- Hide sidebar on index page -->
+{% endblock %}
+
+{% block content %}
+<div class="index-hero">
+    <div class="hero-content">
+        <h1 class="hero-title">render-engine-pg</h1>
+        <p class="hero-subtitle">Configuration-Driven INSERT Handling</p>
+        <p class="hero-description">Define database inserts in pyproject.toml and use them automatically in your collections</p>
+        <div class="hero-buttons">
+            <a href="/docs/overview/" class="btn btn-primary">Get Started</a>
+            <a href="/docs/configuration/" class="btn btn-secondary">Documentation</a>
+        </div>
+    </div>
+</div>
+
+<div class="features-section">
+    <h2>Key Features</h2>
+    <div class="features-grid">
+        <div class="feature">
+            <h3>🎯 Centralized Configuration</h3>
+            <p>Define all your insert SQL in pyproject.toml - no code changes needed</p>
+        </div>
+        <div class="feature">
+            <h3>🔗 Collection-Based</h3>
+            <p>Map collections to their pre-configured inserts for automatic execution</p>
+        </div>
+        <div class="feature">
+            <h3>🔄 Flexible Format</h3>
+            <p>Use semicolon-separated strings or lists - whatever works best for you</p>
+        </div>
+        <div class="feature">
+            <h3>✅ Backward Compatible</h3>
+            <p>Optional parameter means your existing code continues to work unchanged</p>
+        </div>
+    </div>
+</div>
+
+<div class="quick-start-section">
+    <h2>Quick Start</h2>
+    <div class="quick-start-steps">
+        <div class="step">
+            <h3>1. Configure</h3>
+            <pre><code>[tool.render-engine.pg]
+insert_sql = { posts = "INSERT INTO authors..." }</code></pre>
+        </div>
+        <div class="step">
+            <h3>2. Use</h3>
+            <pre><code>PGMarkdownCollectionParser.create_entry(
+    content=markdown,
+    collection_name="posts",
+    connection=db,
+    table="posts"
+)</code></pre>
+        </div>
+        <div class="step">
+            <h3>3. Done!</h3>
+            <p>Pre-configured inserts execute automatically before the markdown entry</p>
+        </div>
+    </div>
+</div>
+
+<div class="docs-section">
+    <h2>Documentation</h2>
+    <ul class="doc-links">
+        <li><a href="/docs/overview/">📖 Overview</a> - Learn what this feature does</li>
+        <li><a href="/docs/configuration/">⚙️ Configuration</a> - Configure your settings</li>
+        <li><a href="/docs/usage/">📚 Usage Guide</a> - Real-world examples</li>
+        <li><a href="/docs/api-reference/">🔌 API Reference</a> - Complete API documentation</li>
+    </ul>
+</div>
+
+<div class="main-content">
+    {{ page.content }}
+</div>
+{% endblock %}
