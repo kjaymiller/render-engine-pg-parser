@@ -16,6 +16,7 @@ class PGSettings:
     """
 
     DEFAULT_SETTINGS = {
+        "read_sql": {},
         "insert_sql": {},
         "default_table": None,
         "auto_commit": True,
@@ -78,6 +79,29 @@ class PGSettings:
 
         logger.debug(f"Loaded PG settings: {merged}")
         return merged
+
+    def get_read_sql(self, collection_name: str) -> str | None:
+        """
+        Get SQL query for reading a collection.
+
+        Args:
+            collection_name: Name of the collection
+
+        Returns:
+            SQL query string for this collection, or None if not configured
+        """
+        read_sql = self.settings.get("read_sql", {})
+
+        if not isinstance(read_sql, dict):
+            logger.warning(f"read_sql is not a dict: {type(read_sql)}")
+            return None
+
+        query = read_sql.get(collection_name)
+
+        if isinstance(query, str):
+            return query.strip() if query.strip() else None
+
+        return None
 
     def get_insert_sql(self, collection_name: str) -> list[str]:
         """

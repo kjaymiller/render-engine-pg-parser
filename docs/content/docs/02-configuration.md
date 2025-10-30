@@ -19,19 +19,58 @@ auto_commit = true
 
 ## Settings Reference
 
+### `read_sql`
+
+**Type:** `dict[str, str]`
+**Required:** No
+**Default:** `{}`
+
+Defines SQL SELECT queries for reading collection content. These queries are used by ContentManager to fetch data from the database. Maps collection names to their SELECT queries.
+
+```toml
+[tool.render-engine.pg]
+read_sql = {
+    posts = "SELECT id, title, content, author_id FROM posts ORDER BY created_at DESC",
+    docs = "SELECT id, slug, content FROM documentation WHERE published = true"
+}
+```
+
+**Usage with ContentManager:**
+
+When creating a collection, pass the query from settings:
+
+```python
+from render_engine_pg.re_settings_parser import PGSettings
+from render_engine_pg.connection import PostgresQuery
+from render_engine_pg.content_manager import PostgresContentManager
+
+settings = PGSettings()
+read_query = settings.get_read_sql("posts")
+
+collection = Collection(
+    name="blog",
+    query=PostgresQuery(
+        connection=db,
+        query=read_query
+    ),
+    Parser=PGMarkdownCollectionParser,
+    routes=["blog/{title}/"]
+)
+```
+
 ### `insert_sql`
 
 **Type:** `dict[str, str | list[str]]`
 **Required:** No
 **Default:** `{}`
 
-Defines pre-configured SQL insert statements for collections. Maps collection names to their insert SQL.
+Defines pre-configured SQL insert statements executed when creating new entries via `create_entry()`. Maps collection names to their insert SQL. Supports t-string-like templates with variable substitution from frontmatter attributes.
 
 #### String Format (Semicolon-Separated)
 
 ```toml
 [tool.render-engine.pg]
-insert_sql = { posts = "INSERT INTO users (name) VALUES ('Alice'); INSERT INTO users (name) VALUES ('Bob')" }
+insert_sql = { posts = "INSERT INTO categories (name) VALUES ('Tech'); INSERT INTO categories (name) VALUES ('Travel')" }
 ```
 
 Queries are split by semicolons. Empty queries are automatically filtered out.
@@ -41,20 +80,70 @@ Queries are split by semicolons. Empty queries are automatically filtered out.
 ```toml
 [tool.render-engine.pg]
 insert_sql = { posts = [
-    "INSERT INTO users (name) VALUES ('Alice')",
-    "INSERT INTO users (name) VALUES ('Bob')"
+    "INSERT INTO categories (name) VALUES ('Tech')",
+    "INSERT INTO categories (name) VALUES ('Travel')"
 ] }
 ```
 
 Use this format for better readability with complex queries.
+
+#### T-String Templates with Variable Substitution
+
+Queries can include t-string-like placeholders using `{variable}` syntax. Template variables are substituted with values from the markdown frontmatter when `create_entry()` is called.
+
+```toml
+[tool.render-engine.pg]
+insert_sql = {
+    posts = "INSERT INTO post_stats (post_id) VALUES ({id})"
+}
+```
+
+When creating a post:
+
+```python
+PGMarkdownCollectionParser.create_entry(
+    content="""---
+id: 42
+title: My Post
+author_id: 7
+---
+# Content""",
+    collection_name="posts",
+    connection=db,
+    table="posts"
+)
+```
+
+This executes:
+1. Template query: `INSERT INTO post_stats (post_id) VALUES (42)`
+2. Main insert: `INSERT INTO posts (id, title, author_id, content) VALUES (42, 'My Post', 7, '# Content')`
+
+**Benefits:**
+- Automatically creates related records (e.g., statistics, relationships) when adding new entries
+- Values are safely parameterized by psycopg, preventing SQL injection
+- No need for manual query execution in your code
+
+**Example: Multiple Templates for a Collection**
+
+```toml
+[tool.render-engine.pg]
+insert_sql = {
+    posts = [
+        "INSERT INTO post_stats (post_id, author_id) VALUES ({id}, {author_id})",
+        "INSERT INTO post_audit_log (post_id, action) VALUES ({id}, 'created')"
+    ]
+}
+```
+
+Both template queries execute for every new entry created.
 
 #### Multiple Collections
 
 ```toml
 [tool.render-engine.pg]
 insert_sql = {
-    posts = "INSERT INTO users (name) VALUES ('Alice')",
-    comments = "INSERT INTO statuses (status) VALUES ('active')"
+    posts = "INSERT INTO post_metadata (post_id) VALUES ({id})",
+    comments = "INSERT INTO comment_metadata (comment_id) VALUES ({id})"
 }
 ```
 

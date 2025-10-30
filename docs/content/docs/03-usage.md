@@ -144,6 +144,137 @@ PGMarkdownCollectionParser.create_entry(
 )
 ```
 
+## T-String Templates with create_entry()
+
+When creating new entries programmatically, you can execute template queries that automatically create related records. Template variables come from the markdown frontmatter.
+
+### Basic Template Usage
+
+**Configuration:**
+
+```toml
+[tool.render-engine.pg]
+insert_sql = {
+    posts = "INSERT INTO post_metadata (post_id) VALUES ({id})"
+}
+```
+
+**Usage:**
+
+```python
+PGMarkdownCollectionParser.create_entry(
+    content="""---
+id: 42
+title: My Post
+---
+# Content""",
+    collection_name="posts",
+    connection=db,
+    table="posts"
+)
+```
+
+Execution order:
+1. Template: `INSERT INTO post_metadata (post_id) VALUES (42)`
+2. Main insert: `INSERT INTO posts (id, title, content) VALUES (42, 'My Post', '# Content')`
+
+### Practical Example: Blog with Metadata
+
+**Setup:**
+
+```sql
+CREATE TABLE posts (
+    id SERIAL PRIMARY KEY,
+    title TEXT,
+    content TEXT,
+    author_id INT
+);
+
+CREATE TABLE post_metadata (
+    post_id INT PRIMARY KEY,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE author_post_count (
+    author_id INT,
+    post_count INT DEFAULT 1
+);
+```
+
+**Configuration:**
+
+```toml
+[tool.render-engine.pg]
+insert_sql = {
+    blog = [
+        "INSERT INTO post_metadata (post_id) VALUES ({id})",
+        "INSERT INTO author_post_count (author_id, post_count) VALUES ({author_id}, 1) ON CONFLICT (author_id) DO UPDATE SET post_count = post_count + 1"
+    ]
+}
+```
+
+**Usage:**
+
+```python
+PGMarkdownCollectionParser.create_entry(
+    content="""---
+id: 42
+title: My First Post
+author_id: 7
+---
+# My Content""",
+    collection_name="blog",
+    connection=db,
+    table="posts"
+)
+```
+
+Result:
+- Inserts post metadata record
+- Updates author post count
+- Inserts main post content
+
+### Template Variables
+
+Template variables come from your markdown frontmatter. Any frontmatter attribute can be used:
+
+```toml
+insert_sql = {
+    posts = [
+        "INSERT INTO post_tags (post_id, tag_id) VALUES ({id}, {tag_id})",
+        "INSERT INTO post_audit (post_id, author, action) VALUES ({id}, {author_id}, 'created')"
+    ]
+}
+```
+
+Frontmatter example:
+
+```yaml
+---
+id: 42
+title: My Post
+author_id: 7
+tag_id: 5
+---
+```
+
+### Multiple Templates per Collection
+
+Execute multiple queries for each new entry:
+
+```toml
+insert_sql = {
+    products = [
+        "INSERT INTO product_inventory (product_id) VALUES ({id})",
+        "INSERT INTO product_audit_log (product_id, action) VALUES ({id}, 'created')",
+        "INSERT INTO category_product_count (category_id) VALUES ({category_id})"
+    ]
+}
+```
+
+All three queries run when creating a new product entry.
+
 ## Advanced Patterns
 
 ### Conditional Inserts

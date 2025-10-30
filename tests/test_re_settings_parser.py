@@ -218,3 +218,98 @@ class TestPGMarkdownCollectionParserWithInserts:
             combined = " ".join(identifier_strs)
 
             assert "collection_name" not in combined.lower()
+
+
+class TestPGMarkdownCollectionParserTemplates:
+    """Test PGMarkdownCollectionParser.create_entry() with t-string templates."""
+
+    def test_create_entry_with_template_queries(self, mock_connection):
+        """Test create_entry() executes template queries with frontmatter attributes."""
+        content = """---
+id: 42
+title: My Post
+views: 100
+---
+# Test Content"""
+
+        with patch('render_engine_pg.parsers.PGSettings') as mock_settings_class:
+            with patch('render_engine_pg.parsers.sql.SQL') as mock_sql_class:
+                mock_settings = MagicMock()
+                mock_settings.get_insert_sql.return_value = [
+                    "INSERT INTO post_reads (post_id) VALUES ({id})",
+                    "INSERT INTO post_stats (post_id, view_count) VALUES ({id}, {views})"
+                ]
+                mock_settings_class.return_value = mock_settings
+
+                mock_query_obj = MagicMock()
+                mock_query_obj.as_string.return_value = "INSERT INTO posts ..."
+                mock_sql_class.return_value.format.return_value = mock_query_obj
+
+                PGMarkdownCollectionParser.create_entry(
+                    content=content,
+                    collection_name="blog",
+                    connection=mock_connection,
+                    table="posts"
+                )
+
+                # Verify settings were loaded
+                mock_settings.get_insert_sql.assert_called_with("blog")
+
+                # Verify templates were executed with frontmatter data
+                cursor_mock = mock_connection.cursor.return_value.__enter__.return_value
+                execute_calls = cursor_mock.execute.call_args_list
+
+                # Should have executed both templates + main insert
+                assert len(execute_calls) >= 2
+
+    def test_create_entry_without_collection_name_skips_templates(self, mock_connection):
+        """Test create_entry() skips templates when collection_name not provided."""
+        content = "---\ntitle: Test\n---\n# Hello"
+
+        with patch('render_engine_pg.parsers.PGSettings') as mock_settings_class:
+            with patch('render_engine_pg.parsers.sql.SQL') as mock_sql_class:
+                mock_query_obj = MagicMock()
+                mock_query_obj.as_string.return_value = "INSERT INTO pages ..."
+                mock_sql_class.return_value.format.return_value = mock_query_obj
+
+                PGMarkdownCollectionParser.create_entry(
+                    content=content,
+                    connection=mock_connection,
+                    table="pages"
+                )
+
+                # PGSettings should NOT be instantiated when collection_name is None
+                mock_settings_class.assert_not_called()
+
+    def test_create_entry_with_missing_template_variable(self, mock_connection):
+        """Test create_entry() handles missing template variables."""
+        content = """---
+id: 42
+title: My Post
+---
+# Content"""
+
+        with patch('render_engine_pg.parsers.PGSettings') as mock_settings_class:
+            with patch('render_engine_pg.parsers.sql.SQL') as mock_sql_class:
+                mock_settings = MagicMock()
+                # Template requires {views} which is not in frontmatter
+                mock_settings.get_insert_sql.return_value = [
+                    "INSERT INTO post_stats (post_id, view_count) VALUES ({id}, {views})"
+                ]
+                mock_settings_class.return_value = mock_settings
+
+                mock_query_obj = MagicMock()
+                mock_query_obj.as_string.return_value = "INSERT INTO posts ..."
+                mock_sql_class.return_value.format.return_value = mock_query_obj
+
+                cursor_mock = mock_connection.cursor.return_value.__enter__.return_value
+                # Execute should raise KeyError for missing {views}
+                cursor_mock.execute.side_effect = KeyError("views")
+
+                with pytest.raises(KeyError):
+                    PGMarkdownCollectionParser.create_entry(
+                        content=content,
+                        collection_name="blog",
+                        connection=mock_connection,
+                        table="posts"
+                    )
