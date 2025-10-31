@@ -76,8 +76,17 @@ class ReadQueryGenerator:
         # Build the SELECT clause
         select_cols = [f"{table}.{col}" for col in obj["columns"]]
 
-        # Start query with basic SELECT
-        query_parts = [f"SELECT {', '.join(select_cols)}"]
+        # For collections/attributes with many-to-many relationships, use DISTINCT ON
+        # to avoid duplicate rows from JOINs
+        has_many_to_many = bool(many_to_many)
+        is_collection = obj_type == "collection"
+
+        if is_collection and has_many_to_many:
+            # Use DISTINCT ON (id) to get one row per main object
+            query_parts = [f"SELECT DISTINCT ON ({table}.id) {', '.join(select_cols)}"]
+        else:
+            # Regular SELECT for pages and objects without M2M relationships
+            query_parts = [f"SELECT {', '.join(select_cols)}"]
 
         # Add FROM clause
         query_parts.append(f"FROM {table}")
@@ -119,11 +128,19 @@ class ReadQueryGenerator:
             query_parts.append(f"WHERE {table}.id = {{id}};")
         else:
             # Collections and attributes - fetch all items
-            # Add ORDER BY for better defaults (by id, or by date if available)
-            if "date" in obj["columns"]:
-                query_parts.append(f"ORDER BY {table}.date DESC;")
+            # For DISTINCT ON queries, ORDER BY must start with the DISTINCT ON column
+            if is_collection and has_many_to_many:
+                # Must order by the DISTINCT ON column first, then other columns
+                if "date" in obj["columns"]:
+                    query_parts.append(f"ORDER BY {table}.id, {table}.date DESC;")
+                else:
+                    query_parts.append(f"ORDER BY {table}.id;")
             else:
-                query_parts.append(";")
+                # No DISTINCT ON needed, can order by any column
+                if "date" in obj["columns"]:
+                    query_parts.append(f"ORDER BY {table}.date DESC;")
+                else:
+                    query_parts.append(";")
 
         return " ".join(query_parts)
 
