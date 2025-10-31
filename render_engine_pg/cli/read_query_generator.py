@@ -77,11 +77,15 @@ class ReadQueryGenerator:
         select_cols = [f"{table}.{col}" for col in obj["columns"]]
         agg_cols = []  # For array_agg columns
 
-        # For collections with many-to-many relationships, use GROUP BY with array_agg
+        # For collections with many-to-many relationships, deduplicate entries
         has_many_to_many = bool(many_to_many)
         is_collection = obj_type == "collection"
 
-        # Start with basic SELECT (we'll add array_agg columns later)
+        # Determine if we need DISTINCT ON (when M2M but no array_agg) or GROUP BY (when array_agg)
+        # We'll decide after processing M2M relationships
+        use_distinct_on = is_collection and has_many_to_many
+
+        # Start with basic SELECT (we'll modify it based on aggregates)
         query_parts = [f"SELECT {', '.join(select_cols)}"]
 
         # Add FROM clause
@@ -138,9 +142,15 @@ class ReadQueryGenerator:
 
         # Add array_agg columns to SELECT if we have any
         if agg_cols:
+            # We have aggregate columns, so we'll use GROUP BY instead of DISTINCT ON
+            use_distinct_on = False
             # Modify the SELECT statement to include array_agg columns
             select_with_aggs = f"SELECT {', '.join(select_cols)}, {', '.join(agg_cols)}"
             query_parts[0] = select_with_aggs
+        elif use_distinct_on:
+            # No aggregate columns but M2M in collection - use DISTINCT ON
+            select_distinct = f"SELECT DISTINCT ON ({table}.id) {', '.join(select_cols)}"
+            query_parts[0] = select_distinct
 
         # Add WHERE clause based on object type
         # Pages: Single item lookup by ID
@@ -156,10 +166,18 @@ class ReadQueryGenerator:
                 query_parts.append(group_by_clause)
 
             # Add ORDER BY
-            if "date" in obj["columns"]:
-                query_parts.append(f"ORDER BY {table}.date DESC;")
+            if use_distinct_on:
+                # For DISTINCT ON, ORDER BY must start with the DISTINCT ON column
+                if "date" in obj["columns"]:
+                    query_parts.append(f"ORDER BY {table}.id, {table}.date DESC;")
+                else:
+                    query_parts.append(f"ORDER BY {table}.id;")
             else:
-                query_parts.append(";")
+                # For GROUP BY or no dedup needed
+                if "date" in obj["columns"]:
+                    query_parts.append(f"ORDER BY {table}.date DESC;")
+                else:
+                    query_parts.append(";")
 
         return " ".join(query_parts)
 
