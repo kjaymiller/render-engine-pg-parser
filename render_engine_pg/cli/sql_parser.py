@@ -228,19 +228,31 @@ class SQLParser:
         columns = []
         ignored_columns = []
 
-        # Split by comma to handle each column/constraint definition
-        for part in columns_def.split(','):
-            # Check if this line has an -- ignore comment
-            has_ignore = '-- ignore' in part.lower()
+        # Split by lines to parse each column definition
+        # This handles -- ignore comments that appear on the same line as the column
+        lines = columns_def.split('\n')
+
+        for line in lines:
+            line_stripped = line.strip()
+
+            # Skip empty lines and comment-only lines
+            if not line_stripped or line_stripped.startswith('--'):
+                continue
+
+            # Remove trailing comma for processing
+            line_for_parsing = line_stripped.rstrip(',').strip()
+
+            # Check if this line has -- ignore comment
+            has_ignore = bool(re.search(r'--\s*ignore', line_stripped, re.IGNORECASE))
 
             # Remove the comment part for parsing
-            part_without_comment = part.split('--')[0] if '--' in part else part
+            col_def_no_comment = line_for_parsing.split('--')[0] if '--' in line_for_parsing else line_for_parsing
 
             # Remove parentheses and extra whitespace
-            part_without_comment = part_without_comment.strip().strip('()')
+            col_def_no_comment = col_def_no_comment.strip().strip('()')
 
             # Extract the first word as the column name (ignore constraints)
-            words = part_without_comment.split()
+            words = col_def_no_comment.split()
             if words:
                 col_name = words[0].strip()
                 # Skip constraint keywords and empty names
@@ -253,11 +265,11 @@ class SQLParser:
                         should_ignore = has_ignore
 
                         # Check for PRIMARY KEY
-                        if self.ignore_pk and 'PRIMARY KEY' in part.upper():
+                        if self.ignore_pk and 'PRIMARY KEY' in line_stripped.upper():
                             should_ignore = True
 
                         # Check for TIMESTAMP
-                        if self.ignore_timestamps and 'TIMESTAMP' in part.upper():
+                        if self.ignore_timestamps and 'TIMESTAMP' in line_stripped.upper():
                             should_ignore = True
 
                         if should_ignore:
