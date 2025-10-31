@@ -11,29 +11,12 @@ A PostgreSQL plugin for [render-engine](https://render-engine.io) that enables c
 - **Flexible Parsing** - Custom parsers for different content types
 - **Type-Safe** - Full type hints and Python 3.10+ support
 
-## What's New
+## Quick Features
 
-### Collection-Based Insert Configuration
-
-Define pre-configured SQL insert statements in your `pyproject.toml` and execute them automatically when creating entries:
-
-```toml
-[tool.render-engine.pg]
-insert_sql = { posts = "INSERT INTO authors (name) VALUES ('John Doe')" }
-```
-
-Then use them in your code:
-
-```python
-PGMarkdownCollectionParser.create_entry(
-    content="---\ntitle: My Post\n---\nContent",
-    collection_name="posts",
-    connection=db,
-    table="posts"
-)
-```
-
-The pre-configured inserts execute automatically before the markdown entry is inserted.
+- **CLI Tool** - Generate TOML configuration from SQL schema files with `@collection`, `@attribute`, and `@junction` annotations
+- **PostgresContentManager** - Automatically fetch collection pages from database queries defined in `pyproject.toml`
+- **Smart Relationships** - Auto-generate JOINs for foreign keys and many-to-many relationships with array aggregation
+- **Column Control** - Mark columns to ignore with `-- ignore` comments or CLI flags (`--ignore-pk`, `--ignore-timestamps`)
 
 ## Installation
 
@@ -49,7 +32,43 @@ pip install render-engine-pg[dev]
 
 ## Quick Start
 
-### 1. Set Up Database Connection
+### 1. Define Your Database Schema
+
+Create `schema.sql` with render-engine annotations:
+
+```sql
+-- @collection
+CREATE TABLE blog (
+    id SERIAL PRIMARY KEY,
+    slug VARCHAR(255) UNIQUE NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    content TEXT NOT NULL,
+    date TIMESTAMP NOT NULL
+);
+
+-- @attribute
+CREATE TABLE tags (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) UNIQUE NOT NULL -- @aggregate
+);
+
+-- @junction
+CREATE TABLE blog_tags (
+    blog_id INTEGER NOT NULL REFERENCES blog(id),
+    tag_id INTEGER NOT NULL REFERENCES tags(id),
+    PRIMARY KEY (blog_id, tag_id)
+);
+```
+
+### 2. Generate Configuration with CLI
+
+```bash
+uv run python -m render_engine_pg.cli.sql_cli schema.sql -o config.toml
+```
+
+This generates `config.toml` with `insert_sql` and `read_sql`. Merge into `pyproject.toml`.
+
+### 3. Set Up Database Connection
 
 ```python
 from render_engine_pg.connection import get_db_connection
@@ -62,119 +81,110 @@ connection = get_db_connection(
 )
 ```
 
-Or use a connection string:
-
-```python
-connection = get_db_connection(
-    connection_string="postgresql://user:pass@localhost/mydb"
-)
-```
-
-### 2. Configure Insert SQL in `pyproject.toml`
-
-```toml
-[tool.render-engine.pg]
-insert_sql = {
-    blog_posts = "INSERT INTO categories (name) VALUES ('Tech'); INSERT INTO categories (name) VALUES ('Travel')"
-}
-```
-
-### 3. Use in Your Site
+### 4. Create Your Collections
 
 ```python
 from render_engine import Site, Collection
-from render_engine_pg.parsers import PGPageParser, PGMarkdownCollectionParser
-from render_engine_pg import PostgresQuery
+from render_engine_pg.content_manager import PostgresContentManager
+from render_engine_pg.parsers import PGPageParser
 
 site = Site()
 
 @site.collection
-class BlogPosts(Collection):
-    content_path = PostgresQuery(
-        connection=connection,
-        query="SELECT * FROM posts ORDER BY created_at DESC"
-    )
+class Blog(Collection):
+    ContentManager = PostgresContentManager
+    content_manager_extras = {"connection": connection}
     parser = PGPageParser
-
-@site.collection
-class BlogEntries(Collection):
-    parser = PGMarkdownCollectionParser
-    # Pre-configured inserts will execute automatically
-    # for collection_name="blog_entries"
+    routes = ["blog/{slug}/"]
 ```
+
+The `ContentManager` automatically loads `read_sql['blog']` from `pyproject.toml` and fetches data from your database.
 
 ## Usage Examples
 
-### Single Record to Page Attributes
+### Blog with Tags (PostgreSQL)
 
-```python
-from render_engine_pg.parsers import PGPageParser
+**Database Schema:**
 
-# Query returns one row
-postgres_query = PostgresQuery(
-    connection=connection,
-    query="SELECT id, title, content, author FROM posts WHERE id = 1"
-)
+```sql
+-- @collection
+CREATE TABLE posts (id SERIAL PRIMARY KEY, slug VARCHAR(255), title VARCHAR(255), ...);
 
-# Attributes become page attributes
-page = Page(content_path=postgres_query, parser=PGPageParser)
-# page.id, page.title, page.content, page.author are available
+-- @attribute
+CREATE TABLE tags (id SERIAL PRIMARY KEY, name VARCHAR(100) -- @aggregate);
+
+-- @junction
+CREATE TABLE post_tags (post_id INT REFERENCES posts(id), tag_id INT REFERENCES tags(id));
 ```
 
-### Multiple Records to Collection
+**Generated Configuration:**
+
+```toml
+[tool.render-engine.pg.read_sql]
+posts = "SELECT posts.*, array_agg(DISTINCT tags.name) as tag_names FROM posts LEFT JOIN post_tags ... GROUP BY posts.id"
+```
+
+**Collection Definition:**
 
 ```python
-from render_engine_pg.parsers import PGPageParser
-
-# Query returns multiple rows
-postgres_query = PostgresQuery(
-    connection=connection,
-    query="SELECT * FROM posts"
-)
-
 @site.collection
-class AllPosts(Collection):
-    content_path = postgres_query
+class Posts(Collection):
+    ContentManager = PostgresContentManager
+    content_manager_extras = {"connection": connection}
     parser = PGPageParser
-    # page.data contains all rows
-    # page.id, page.title, etc. contain lists of values
+    routes = ["blog/{slug}/"]
 ```
 
-### Markdown with Pre-Configured Inserts
+### Documentation Site
+
+**Collection for documentation pages:**
 
 ```python
-from render_engine_pg.parsers import PGMarkdownCollectionParser
+@site.collection
+class Documentation(Collection):
+    ContentManager = PostgresContentManager
+    content_manager_extras = {"connection": connection}
+    parser = PGPageParser
+    routes = ["docs/{slug}/"]
+```
 
-# Configure in pyproject.toml:
-# [tool.render-engine.pg]
-# insert_sql = { my_posts = "INSERT INTO authors..." }
+### Product Catalog
 
-# Create entry - inserts execute automatically
-result = PGMarkdownCollectionParser.create_entry(
-    content="---\ntitle: My Post\nauthor: Jane\n---\nContent",
-    collection_name="my_posts",
-    connection=connection,
-    table="posts"
-)
+```python
+@site.collection
+class Products(Collection):
+    ContentManager = PostgresContentManager
+    content_manager_extras = {
+        "connection": connection,
+        "collection_name": "products"  # Override lookup name if needed
+    }
+    parser = PGPageParser
+    routes = ["products/{slug}/"]
 ```
 
 ## Configuration
 
-Settings are read from `[tool.render-engine.pg]` in `pyproject.toml`:
+Settings are read from `[tool.render-engine.pg]` in `pyproject.toml`. Generate this automatically with the CLI:
+
+```bash
+uv run python -m render_engine_pg.cli.sql_cli schema.sql --ignore-pk --ignore-timestamps
+```
+
+This creates:
 
 ```toml
-[tool.render-engine.pg]
-# Define SQL insert statements for collections
-insert_sql = {
-    posts = "INSERT INTO users (name) VALUES ('Alice'); INSERT INTO users (name) VALUES ('Bob')",
-    comments = ["INSERT INTO statuses (status) VALUES ('active')", "INSERT INTO statuses (status) VALUES ('pending')"]
-}
+[tool.render-engine.pg.read_sql]
+# SQL SELECT queries for fetching collection pages
+blog = "SELECT blog.id, blog.slug, blog.title, blog.content FROM blog ORDER BY date DESC"
+docs = "SELECT docs.id, docs.slug, docs.content FROM docs"
 
-# Optional: Default table name
-default_table = "pages"
-
-# Optional: Auto-commit transactions (default: true)
-auto_commit = true
+[tool.render-engine.pg.insert_sql]
+# Dependency-ordered INSERT statements
+blog = [
+    "INSERT INTO tags (name) VALUES (...)",
+    "INSERT INTO blog_tags (blog_id, tag_id) VALUES (...)",
+    "INSERT INTO blog (slug, title, content, date) VALUES (...)"
+]
 ```
 
 See [Configuration Guide](./docs/content/docs/02-configuration.md) for complete details.
@@ -209,22 +219,28 @@ See [DOCS.md](./DOCS.md) for documentation development guide.
 
 ### Core Components
 
-- **`PGPageParser`** - Parse single query results into page attributes
-- **`PGMarkdownCollectionParser`** - Convert markdown with frontmatter to SQL inserts
-- **`PostgresContentManager`** - Yield multiple pages from database queries
-- **`PGSettings`** - Load and manage settings from `pyproject.toml`
+- **`PostgresContentManager`** - Fetches collection pages from database queries in `pyproject.toml`
+- **`PGPageParser`** - Parses database query results into page attributes
+- **`PGSettings`** - Loads configuration from `[tool.render-engine.pg]` in `pyproject.toml`
+- **CLI Tools** - Generate TOML configuration from SQL schema files
 - **Connection utilities** - PostgreSQL connection management
 
 ### Data Flow
 
 ```
+schema.sql (with @annotations)
+    ↓
+CLI Tool
+    ↓
 pyproject.toml [tool.render-engine.pg]
     ↓
-PGSettings (loads configuration)
+render-engine Collection
     ↓
-PGMarkdownCollectionParser.create_entry()
+PostgresContentManager (loads read_sql query)
     ↓
-Execute pre-configured inserts + markdown insert
+PGPageParser (parses database rows)
+    ↓
+Generated static pages
 ```
 
 ## Testing
@@ -285,31 +301,62 @@ render-engine-pg-parser/
 
 ## CLI Tools
 
-Generate INSERT statements from SQL schema files:
+Generate TOML configuration from SQL schema files:
 
 ```bash
-render-engine-pg schema.sql -o inserts.sql --verbose
+uv run python -m render_engine_pg.cli.sql_cli schema.sql -o config.toml
 ```
 
-Options:
-- `-o, --output` - Output file (default: stdout)
-- `--verbose` - Show debug information
-- `--format` - Output format: sql or json (default: sql)
-- `--objects` - Filter by object types: page, collection, attribute, junction
+**Options:**
 
-See [CLI Guide](./docs/content/docs/03-usage.md#cli-tools) for details.
+- `-o, --output` - Output TOML file (default: stdout)
+- `-v, --verbose` - Show debug information
+- `--ignore-pk` - Exclude PRIMARY KEY columns from INSERT statements
+- `--ignore-timestamps` - Exclude TIMESTAMP columns from INSERT statements
+- `--objects` - Filter by object types (collection, attribute, junction, page)
+
+**Example:**
+
+```bash
+uv run python -m render_engine_pg.cli.sql_cli schema.sql \
+  --ignore-pk \
+  --ignore-timestamps \
+  -o config.toml
+```
+
+This generates `insert_sql` and `read_sql` with proper dependency ordering and relationship handling.
 
 ## Examples
 
 ### Blog Site
 
-```python
-from render_engine import Site
-from render_engine_pg.connection import get_db_connection
-from render_engine_pg.parsers import PGPageParser
-from render_engine_pg import PostgresQuery
+**1. Create schema.sql:**
 
-# Connect to database
+```sql
+-- @collection
+CREATE TABLE posts (
+    id SERIAL PRIMARY KEY, -- ignore
+    slug VARCHAR(255) UNIQUE NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    content TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW() -- ignore
+);
+```
+
+**2. Generate config:**
+
+```bash
+uv run python -m render_engine_pg.cli.sql_cli schema.sql --ignore-pk --ignore-timestamps
+```
+
+**3. Define collection:**
+
+```python
+from render_engine import Site, Collection
+from render_engine_pg.content_manager import PostgresContentManager
+from render_engine_pg.parsers import PGPageParser
+from render_engine_pg.connection import get_db_connection
+
 db = get_db_connection(
     host="localhost",
     database="my_blog",
@@ -317,38 +364,35 @@ db = get_db_connection(
     password="secret"
 )
 
-# Create site
 site = Site()
-site.update_site_vars(SITE_TITLE="My Blog")
 
-# Blog posts collection
 @site.collection
-class BlogPosts:
-    content_path = PostgresQuery(
-        connection=db,
-        query="SELECT id, title, content, author, created_at FROM posts ORDER BY created_at DESC"
-    )
+class Posts(Collection):
+    ContentManager = PostgresContentManager
+    content_manager_extras = {"connection": db}
     parser = PGPageParser
-    routes = ["blog/"]
-    sort_by = "created_at"
+    routes = ["blog/{slug}/"]
 ```
 
-### E-Commerce Product Pages
+### Multiple Collections
 
 ```python
-# Configure in pyproject.toml:
-# [tool.render-engine.pg]
-# insert_sql = { products = "INSERT INTO suppliers...; INSERT INTO categories..." }
+@site.collection
+class Posts(Collection):
+    ContentManager = PostgresContentManager
+    content_manager_extras = {"connection": db}
+    parser = PGPageParser
+    routes = ["blog/{slug}/"]
 
 @site.collection
-class Products:
-    content_path = PostgresQuery(
-        connection=db,
-        query="SELECT * FROM products WHERE active = true"
-    )
+class Documentation(Collection):
+    ContentManager = PostgresContentManager
+    content_manager_extras = {"connection": db}
     parser = PGPageParser
-    routes = ["products/"]
+    routes = ["docs/{slug}/"]
 ```
+
+Both automatically use their lowercased class names to look up `read_sql` from `pyproject.toml`.
 
 ## Troubleshooting
 

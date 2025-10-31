@@ -6,23 +6,75 @@ layout: doc
 
 # Usage Guide
 
-Learn how to use collection-based insert configuration in your render-engine PostgreSQL project.
+Learn how to set up collections with PostgreSQL in your render-engine site.
 
-## Basic Usage
+## Basic Workflow
 
-### 1. Define Configuration
+### 1. Define Your Database Schema
 
-In your `pyproject.toml`:
+Create a SQL schema file with render-engine annotations:
 
-```toml
-[tool.render-engine.pg]
-insert_sql = { blog_posts = "INSERT INTO authors (name) VALUES ('John Doe')" }
+```sql
+-- @collection
+CREATE TABLE IF NOT EXISTS blog (
+    id SERIAL PRIMARY KEY,
+    slug VARCHAR(255) UNIQUE NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    content TEXT NOT NULL,
+    date TIMESTAMP NOT NULL
+);
+
+-- @attribute
+CREATE TABLE IF NOT EXISTS tags (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) UNIQUE NOT NULL -- @aggregate
+);
+
+-- @junction
+CREATE TABLE IF NOT EXISTS blog_tags (
+    blog_id INTEGER NOT NULL REFERENCES blog(id),
+    tag_id INTEGER NOT NULL REFERENCES tags(id),
+    PRIMARY KEY (blog_id, tag_id)
+);
 ```
 
-### 2. Use in Code
+### 2. Generate Configuration with CLI
+
+Use the SQL CLI tool to generate your TOML configuration from the schema:
+
+```bash
+uv run python -m render_engine_pg.cli.sql_cli schema.sql -o config.toml
+
+# Or with options
+uv run python -m render_engine_pg.cli.sql_cli schema.sql \
+  --ignore-pk \
+  --ignore-timestamps \
+  -o config.toml
+```
+
+This generates a `config.toml` with:
+```toml
+[tool.render-engine.pg.insert_sql]
+blog = [
+    "INSERT INTO tags (name) VALUES (...)",
+    "INSERT INTO blog_tags (blog_id, tag_id) VALUES (...)",
+    "INSERT INTO blog (slug, title, content, date) VALUES (...)"
+]
+
+[tool.render-engine.pg.read_sql]
+blog = "SELECT blog.id, blog.slug, blog.title, blog.content, blog.date, array_agg(DISTINCT tags.name) as tags_names FROM blog LEFT JOIN blog_tags ON blog.id = blog_tags.blog_id LEFT JOIN tags ON blog_tags.tag_id = tags.id GROUP BY blog.id, blog.slug, blog.title, blog.content, blog.date ORDER BY blog.date DESC;"
+```
+
+Merge this into your `pyproject.toml`.
+
+### 3. Define Your Collection Class
+
+Create a Collection class that uses the generated `read_sql`:
 
 ```python
-from render_engine_pg.parsers import PGMarkdownCollectionParser
+from render_engine import Collection
+from render_engine_pg.content_manager import PostgresContentManager
+from render_engine_pg.parsers import PGPageParser
 from render_engine_pg.connection import get_db_connection
 
 # Get database connection
@@ -33,384 +85,376 @@ connection = get_db_connection(
     password="secret"
 )
 
-# Create entry with pre-configured inserts
-result = PGMarkdownCollectionParser.create_entry(
-    content="""---
-title: My First Post
-author: John Doe
----
+@site.collection
+class Blog(Collection):
+    """Blog posts with tags"""
 
-This is my first blog post!
-""",
-    collection_name="blog_posts",
-    connection=connection,
-    table="posts"
-)
+    ContentManager = PostgresContentManager
+    content_manager_extras = {"connection": connection}
 
-print(f"Created post with query: {result}")
+    parser = PGPageParser
+    routes = ["blog/{slug}/"]
+```
+
+The `ContentManager` automatically:
+- Looks up `read_sql` from `pyproject.toml` using the collection name (lowercased)
+- Fetches data from the database
+- Yields Page objects for each row
+
+### 4. Access Collection Data
+
+In your templates:
+
+```jinja2
+<h1>{{ page.title }}</h1>
+<time>{{ page.date }}</time>
+<p>{{ page.content }}</p>
+
+{% if page.tags_names %}
+<div class="tags">
+  {% for tag in page.tags_names %}
+    <span class="tag">{{ tag }}</span>
+  {% endfor %}
+</div>
+{% endif %}
 ```
 
 ## Real-World Examples
 
-### Blog with Categories and Tags
+### Blog with Multiple Authors and Categories
 
-**Configuration:**
+**Schema:**
+
+```sql
+-- @collection
+CREATE TABLE IF NOT EXISTS posts (
+    id SERIAL PRIMARY KEY,
+    slug VARCHAR(255) UNIQUE NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    content TEXT NOT NULL,
+    author_id INT NOT NULL REFERENCES authors(id),
+    category_id INT NOT NULL REFERENCES categories(id),
+    created_at TIMESTAMP DEFAULT NOW() -- ignore
+);
+
+-- @attribute
+CREATE TABLE IF NOT EXISTS authors (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) UNIQUE NOT NULL
+);
+
+-- @attribute
+CREATE TABLE IF NOT EXISTS categories (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) UNIQUE NOT NULL
+);
+```
+
+**Generated TOML:**
 
 ```toml
-[tool.render-engine.pg]
-insert_sql = {
-    blog_posts = """
-        INSERT INTO categories (name) VALUES ('Technology');
-        INSERT INTO categories (name) VALUES ('Travel');
-        INSERT INTO categories (name) VALUES ('Lifestyle')
-    """
-}
+[tool.render-engine.pg.insert_sql]
+posts = [
+    "INSERT INTO authors (name) VALUES (...)",
+    "INSERT INTO categories (name) VALUES (...)",
+    "INSERT INTO posts (slug, title, content, author_id, category_id) VALUES (...)"
+]
+
+[tool.render-engine.pg.read_sql]
+posts = "SELECT posts.id, posts.slug, posts.title, posts.content, posts.author_id, posts.category_id, authors.name as author_name, categories.name as category_name FROM posts LEFT JOIN authors ON posts.author_id = authors.id LEFT JOIN categories ON posts.category_id = categories.id ORDER BY posts.created_at DESC;"
 ```
 
-**Code:**
+**Collection Definition:**
 
 ```python
-# This will create the categories before inserting the post
-PGMarkdownCollectionParser.create_entry(
-    content=post_markdown,
-    collection_name="blog_posts",
-    connection=db,
-    table="posts",
-    category_id=1  # Can reference the inserted categories
-)
+@site.collection
+class Posts(Collection):
+    """Blog posts with author and category"""
+
+    ContentManager = PostgresContentManager
+    content_manager_extras = {"connection": connection}
+
+    parser = PGPageParser
+    routes = ["blog/{slug}/"]
 ```
 
-### E-Commerce Product Collection
+**Template Usage:**
 
-**Configuration:**
+```jinja2
+<article>
+    <h1>{{ page.title }}</h1>
+    <byline>By <a href="/authors/{{ page.author_name|slugify }}/">{{ page.author_name }}</a></byline>
+    <p class="category"><a href="/categories/{{ page.category_name|slugify }}/">{{ page.category_name }}</a></p>
+    <div class="content">{{ page.content }}</div>
+</article>
+```
+
+### Product Catalog with Variants and Reviews
+
+**Schema:**
+
+```sql
+-- @collection
+CREATE TABLE products (
+    id SERIAL PRIMARY KEY,
+    slug VARCHAR(255) UNIQUE NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    price DECIMAL(10, 2) NOT NULL
+);
+
+-- @attribute
+CREATE TABLE product_variants (
+    id SERIAL PRIMARY KEY,
+    product_id INT NOT NULL REFERENCES products(id),
+    size VARCHAR(50),
+    color VARCHAR(50),
+    sku VARCHAR(100) UNIQUE NOT NULL
+);
+
+-- @attribute
+CREATE TABLE product_reviews (
+    id SERIAL PRIMARY KEY,
+    product_id INT NOT NULL REFERENCES products(id),
+    rating INT NOT NULL,
+    comment TEXT
+);
+```
+
+**Generated Configuration & Collection:**
+
+```python
+@site.collection
+class Products(Collection):
+    ContentManager = PostgresContentManager
+    content_manager_extras = {"connection": connection}
+
+    parser = PGPageParser
+    routes = ["products/{slug}/"]
+```
+
+### Documentation with Versioning
+
+**Schema:**
+
+```sql
+-- @collection
+CREATE TABLE docs (
+    id SERIAL PRIMARY KEY,
+    slug VARCHAR(255) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    content TEXT NOT NULL,
+    version VARCHAR(20) NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW() -- ignore
+);
+
+-- @attribute
+CREATE TABLE doc_metadata (
+    doc_id INT NOT NULL REFERENCES docs(id),
+    last_updated TIMESTAMP DEFAULT NOW(),
+    status VARCHAR(50) DEFAULT 'published'
+);
+```
+
+**Collection Definition:**
+
+```python
+@site.collection
+class Documentation(Collection):
+    ContentManager = PostgresContentManager
+    content_manager_extras = {"connection": connection}
+
+    parser = PGPageParser
+    routes = ["docs/{version}/{slug}/"]
+```
+
+## How insert_sql Works
+
+When you generate `insert_sql` with the CLI tool, it creates dependency-ordered INSERT statements. This allows multiple related tables to be set up before the main collection table.
+
+The CLI automatically:
+1. Detects foreign key relationships
+2. Orders INSERT statements by dependency
+3. Filters out ignored columns (PRIMARY KEY, TIMESTAMP, etc.)
+4. Groups all inserts for a collection together
+
+**Example output:**
 
 ```toml
-[tool.render-engine.pg]
-insert_sql = {
-    products = [
-        "INSERT INTO suppliers (name) VALUES ('Supplier A')",
-        "INSERT INTO suppliers (name) VALUES ('Supplier B')",
-        "INSERT INTO product_statuses (status) VALUES ('active')",
-        "INSERT INTO product_statuses (status) VALUES ('discontinued')"
-    ]
-}
+[tool.render-engine.pg.insert_sql]
+blog = [
+    "INSERT INTO tags (name) VALUES ('Technology'), ('Travel')",
+    "INSERT INTO blog_tags (blog_id, tag_id) VALUES (1, 1), (1, 2)",
+    "INSERT INTO blog (slug, title, content, date) VALUES ('my-post', 'My Post', '...', NOW())"
+]
 ```
 
-**Code:**
+The INSERT statements execute in order when data is being set up through render-engine.
 
-```python
-for product_data in products:
-    PGMarkdownCollectionParser.create_entry(
-        content=product_data["markdown"],
-        collection_name="products",
-        connection=db,
-        table="products",
-        supplier_id=1,
-        status_id=1
-    )
-```
+## Working with the CLI Tool
 
-### Documentation Site
+### Using Ignore Comments
 
-**Configuration:**
-
-```toml
-[tool.render-engine.pg]
-insert_sql = {
-    docs = "INSERT INTO doc_versions (version) VALUES ('1.0.0')",
-    api_reference = "INSERT INTO api_categories (name) VALUES ('REST'); INSERT INTO api_categories (name) VALUES ('GraphQL')"
-}
-```
-
-**Code:**
-
-```python
-# Create documentation
-PGMarkdownCollectionParser.create_entry(
-    content=doc_markdown,
-    collection_name="docs",
-    connection=db,
-    table="pages",
-    doc_version_id=1
-)
-
-# Create API reference
-PGMarkdownCollectionParser.create_entry(
-    content=api_markdown,
-    collection_name="api_reference",
-    connection=db,
-    table="pages",
-    category_id=1
-)
-```
-
-## T-String Templates with create_entry()
-
-When creating new entries programmatically, you can execute template queries that automatically create related records. Template variables come from the markdown frontmatter.
-
-### Basic Template Usage
-
-**Configuration:**
-
-```toml
-[tool.render-engine.pg]
-insert_sql = {
-    posts = "INSERT INTO post_metadata (post_id) VALUES ({id})"
-}
-```
-
-**Usage:**
-
-```python
-PGMarkdownCollectionParser.create_entry(
-    content="""---
-id: 42
-title: My Post
----
-# Content""",
-    collection_name="posts",
-    connection=db,
-    table="posts"
-)
-```
-
-Execution order:
-1. Template: `INSERT INTO post_metadata (post_id) VALUES (42)`
-2. Main insert: `INSERT INTO posts (id, title, content) VALUES (42, 'My Post', '# Content')`
-
-### Practical Example: Blog with Metadata
-
-**Setup:**
+Mark columns to exclude from INSERT statements:
 
 ```sql
 CREATE TABLE posts (
+    id SERIAL PRIMARY KEY, --ignore
+    slug VARCHAR(255) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW() -- ignore
+);
+```
+
+This prevents `id` and `created_at` from appearing in INSERT statements, allowing PostgreSQL to auto-generate them.
+
+### Using @aggregate Annotations
+
+When a collection has many-to-many relationships with optional array aggregation:
+
+```sql
+-- @attribute
+CREATE TABLE tags (
     id SERIAL PRIMARY KEY,
-    title TEXT,
-    content TEXT,
-    author_id INT
-);
-
-CREATE TABLE post_metadata (
-    post_id INT PRIMARY KEY,
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
-);
-
-CREATE TABLE author_post_count (
-    author_id INT,
-    post_count INT DEFAULT 1
+    name VARCHAR(100) UNIQUE NOT NULL -- @aggregate
 );
 ```
 
-**Configuration:**
+The CLI generates array_agg in the read_sql:
 
-```toml
-[tool.render-engine.pg]
-insert_sql = {
-    blog = [
-        "INSERT INTO post_metadata (post_id) VALUES ({id})",
-        "INSERT INTO author_post_count (author_id, post_count) VALUES ({author_id}, 1) ON CONFLICT (author_id) DO UPDATE SET post_count = post_count + 1"
-    ]
-}
+```sql
+SELECT blog.*, array_agg(DISTINCT tags.name) as tags_names
+FROM blog
+LEFT JOIN blog_tags ON blog.id = blog_tags.blog_id
+LEFT JOIN tags ON blog_tags.tag_id = tags.id
+GROUP BY blog.id, ...
 ```
 
-**Usage:**
+## Collection Configuration Patterns
+
+### Single Collection from One Table
 
 ```python
-PGMarkdownCollectionParser.create_entry(
-    content="""---
-id: 42
-title: My First Post
-author_id: 7
----
-# My Content""",
-    collection_name="blog",
-    connection=db,
-    table="posts"
-)
+@site.collection
+class Posts(Collection):
+    ContentManager = PostgresContentManager
+    content_manager_extras = {"connection": connection}
+    parser = PGPageParser
+    routes = ["blog/{slug}/"]
 ```
 
-Result:
-- Inserts post metadata record
-- Updates author post count
-- Inserts main post content
-
-### Template Variables
-
-Template variables come from your markdown frontmatter. Any frontmatter attribute can be used:
-
-```toml
-insert_sql = {
-    posts = [
-        "INSERT INTO post_tags (post_id, tag_id) VALUES ({id}, {tag_id})",
-        "INSERT INTO post_audit (post_id, author, action) VALUES ({id}, {author_id}, 'created')"
-    ]
-}
-```
-
-Frontmatter example:
-
-```yaml
----
-id: 42
-title: My Post
-author_id: 7
-tag_id: 5
----
-```
-
-### Multiple Templates per Collection
-
-Execute multiple queries for each new entry:
-
-```toml
-insert_sql = {
-    products = [
-        "INSERT INTO product_inventory (product_id) VALUES ({id})",
-        "INSERT INTO product_audit_log (product_id, action) VALUES ({id}, 'created')",
-        "INSERT INTO category_product_count (category_id) VALUES ({category_id})"
-    ]
-}
-```
-
-All three queries run when creating a new product entry.
-
-## Advanced Patterns
-
-### Conditional Inserts
-
-Use Python logic to choose which collection to use:
+### Multiple Collections from Same Database
 
 ```python
-from render_engine_pg.parsers import PGMarkdownCollectionParser
+@site.collection
+class Posts(Collection):
+    ContentManager = PostgresContentManager
+    content_manager_extras = {"connection": connection}
+    parser = PGPageParser
+    routes = ["blog/{slug}/"]
 
-def create_post(markdown, post_type="article"):
-    collection_name = f"blog_{post_type}"
-
-    return PGMarkdownCollectionParser.create_entry(
-        content=markdown,
-        collection_name=collection_name,
-        connection=db,
-        table="posts"
-    )
-
-# Uses different pre-configured inserts based on post type
-create_post(markdown, "article")   # Uses blog_article config
-create_post(markdown, "tutorial")  # Uses blog_tutorial config
+@site.collection
+class Documentation(Collection):
+    ContentManager = PostgresContentManager
+    content_manager_extras = {"connection": connection}
+    parser = PGPageParser
+    routes = ["docs/{slug}/"]
 ```
 
-### Programmatic Settings Access
+Both use their own `read_sql` query from `pyproject.toml`.
+
+### With Custom Connection String
 
 ```python
-from render_engine_pg.re_settings_parser import PGSettings
+from render_engine_pg.connection import get_db_connection
 
-settings = PGSettings()
-
-# Get all queries for a collection
-queries = settings.get_insert_sql("my_collection")
-
-# Check if collection has inserts configured
-if queries:
-    print(f"Found {len(queries)} pre-configured inserts")
-else:
-    print("No pre-configured inserts for this collection")
-
-# Use settings in your logic
-for query in queries:
-    cursor.execute(query)
-```
-
-### Multi-Stage Inserts
-
-Split complex setups across multiple collections:
-
-```toml
-[tool.render-engine.pg]
-insert_sql = {
-    collection_setup = "-- Initial setup\nINSERT INTO config (key, value) VALUES ('initialized', 'true')",
-    collection_main = "-- Main collection inserts\nINSERT INTO roles (name) VALUES ('admin'); INSERT INTO roles (name) VALUES ('user')"
-}
-```
-
-```python
-# First, run setup
-PGMarkdownCollectionParser.create_entry(
-    content="---\ntitle: Setup\n---",
-    collection_name="collection_setup",
-    connection=db,
-    table="setup_log"
+# From environment or config
+connection = get_db_connection(
+    connection_string="postgresql://user:password@localhost:5432/myblog"
 )
 
-# Then run main logic
-PGMarkdownCollectionParser.create_entry(
-    content=main_markdown,
-    collection_name="collection_main",
-    connection=db,
-    table="pages"
-)
+@site.collection
+class Posts(Collection):
+    ContentManager = PostgresContentManager
+    content_manager_extras = {"connection": connection}
+    parser = PGPageParser
+    routes = ["blog/{slug}/"]
 ```
-
-## Without Collection Names
-
-If you don't use `collection_name`, the code works exactly as before:
-
-```python
-# This will NOT execute any pre-configured inserts
-PGMarkdownCollectionParser.create_entry(
-    content=markdown,
-    connection=db,
-    table="pages"
-)
-```
-
-All existing code remains compatible.
 
 ## Troubleshooting
 
-### Pre-configured inserts aren't executing
+### ContentManager isn't fetching data
 
 **Check:**
-1. Is `collection_name` passed to `create_entry()`?
-2. Does the `pyproject.toml` have the `[tool.render-engine.pg]` section?
-3. Is the collection name spelled correctly in both config and code?
+1. Is the `read_sql` generated in `pyproject.toml` under `[tool.render-engine.pg.read_sql]`?
+2. Does the collection name (lowercased class name) match the key in `read_sql`?
+3. Is the database connection correct?
 
 ```python
 # Debug: Check loaded settings
 from render_engine_pg.re_settings_parser import PGSettings
 
 settings = PGSettings()
-print(f"Loaded settings: {settings.settings}")
-print(f"Queries for 'my_collection': {settings.get_insert_sql('my_collection')}")
+print(f"Read SQL: {settings.get_read_sql('blog')}")  # Use lowercased class name
 ```
 
-### SQL syntax errors
+### Collection name mismatch
 
-**Verify:**
-1. Each query is valid SQL
-2. Queries are properly terminated (either with `;` or as separate list items)
-3. No trailing commas in semicolon-separated format
+The `ContentManager` looks up `read_sql` using the collection class name lowercased:
 
-```toml
-# ✓ Good
-insert_sql = { posts = "INSERT INTO users (name) VALUES ('Alice'); INSERT INTO users (name) VALUES ('Bob')" }
+```python
+class Blog(Collection):  # ← Will look for read_sql['blog']
+    ContentManager = PostgresContentManager
+    content_manager_extras = {"connection": connection}
+```
 
-# ✗ Bad - trailing semicolon creates empty query
-insert_sql = { posts = "INSERT INTO users (name) VALUES ('Alice');" }
+If your read_sql is under a different name, use the `collection_name` parameter:
 
-# ✓ Good - empty queries are filtered
-insert_sql = { posts = "INSERT INTO users (name) VALUES ('Alice');;" }
+```python
+@site.collection
+class PostCollection(Collection):
+    ContentManager = PostgresContentManager
+    content_manager_extras = {
+        "connection": connection,
+        "collection_name": "posts"  # ← Override lookup name
+    }
+```
+
+### CLI tool not generating correct queries
+
+**Verify your schema:**
+1. Tables are annotated with `-- @collection`, `-- @attribute`, or `-- @junction`
+2. Foreign keys are defined with `REFERENCES table(id)`
+3. Columns to skip are marked with `-- ignore` comment
+
+```sql
+-- ✓ Good
+-- @collection
+CREATE TABLE posts (
+    id SERIAL PRIMARY KEY, -- ignore
+    slug VARCHAR(255) NOT NULL,
+    title VARCHAR(255) NOT NULL
+);
+
+-- ✗ Bad - missing @collection annotation
+CREATE TABLE posts (
+    id SERIAL PRIMARY KEY,
+    slug VARCHAR(255) NOT NULL
+);
 ```
 
 ### Settings not loading
 
-Ensure `pyproject.toml` is in a parent directory of your Python script:
+Ensure `pyproject.toml` is in the project root or a parent directory:
 
 ```
 project-root/
 ├── pyproject.toml           # Must be here or parent
 ├── src/
-│   └── my_app.py           # Script looking for settings
-└── venv/
+│   └── main.py
+└── docs/
 ```
+
+The `PGSettings()` class automatically searches parent directories.
 
 Next, see [API reference](./04-api-reference.md).

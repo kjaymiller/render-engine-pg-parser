@@ -4,81 +4,139 @@ slug: overview
 layout: doc
 ---
 
-# Collection-Based Insert Configuration
+# render-engine PostgreSQL Plugin
 
-The render-engine PostgreSQL plugin now supports **configuration-driven insert handling** through `pyproject.toml`. This feature allows you to define pre-configured SQL insert statements at the collection level, automatically executing them when creating entries.
+The render-engine PostgreSQL plugin enables you to build static sites with database-driven content. It provides:
+
+1. **Automated Configuration Generation** - Generate TOML config from SQL schema
+2. **Collection Management** - Fetch pages from PostgreSQL via SQL queries
+3. **Smart Relationship Handling** - Auto-generate queries for foreign keys and many-to-many relationships
 
 ## What It Does
 
-Instead of manually building INSERT queries in code, you can define them once in your project configuration and reference them by collection name:
+### Generate Configuration from Schema
 
-```toml
-[tool.render-engine.pg]
-insert_sql = { posts = "INSERT INTO users (name) VALUES ('Alice'); INSERT INTO users (name) VALUES ('Bob')" }
+Use the CLI tool to automatically generate your configuration from a SQL schema file:
+
+```bash
+uv run python -m render_engine_pg.cli.sql_cli schema.sql -o config.toml
 ```
 
-Then simply reference the collection when creating entries:
+Input schema:
+```sql
+-- @collection
+CREATE TABLE blog (
+    id SERIAL PRIMARY KEY,
+    slug VARCHAR(255) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    content TEXT NOT NULL,
+    date TIMESTAMP NOT NULL
+);
+
+-- @attribute
+CREATE TABLE tags (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) UNIQUE NOT NULL -- @aggregate
+);
+
+-- @junction
+CREATE TABLE blog_tags (
+    blog_id INT REFERENCES blog(id),
+    tag_id INT REFERENCES tags(id)
+);
+```
+
+Generated configuration:
+```toml
+[tool.render-engine.pg.read_sql]
+blog = "SELECT blog.*, array_agg(DISTINCT tags.name) as tags_names FROM blog LEFT JOIN blog_tags ... GROUP BY blog.id"
+
+[tool.render-engine.pg.insert_sql]
+blog = [
+    "INSERT INTO tags (name) VALUES (...)",
+    "INSERT INTO blog_tags (blog_id, tag_id) VALUES (...)",
+    "INSERT INTO blog (slug, title, content, date) VALUES (...)"
+]
+```
+
+### Use Collections in Your Site
+
+Define a Collection class that fetches data from the database:
 
 ```python
-PGMarkdownCollectionParser.create_entry(
-    content="---\ntitle: My Post\n---\nContent here",
-    collection_name="posts",
-    connection=db_connection,
-    table="posts"
+from render_engine import Collection
+from render_engine_pg.content_manager import PostgresContentManager
+from render_engine_pg.parsers import PGPageParser
+from render_engine_pg.connection import get_db_connection
+
+connection = get_db_connection(
+    host="localhost",
+    database="myblog",
+    user="postgres",
+    password="secret"
 )
+
+@site.collection
+class Blog(Collection):
+    """Blog posts fetched from PostgreSQL"""
+
+    ContentManager = PostgresContentManager
+    content_manager_extras = {"connection": connection}
+
+    parser = PGPageParser
+    routes = ["blog/{slug}/"]
 ```
 
-The pre-configured inserts execute **before** the markdown content insert, ensuring any required data dependencies are satisfied.
+The `ContentManager` automatically:
+- Looks up `read_sql['blog']` from `pyproject.toml`
+- Executes the query against your database
+- Yields a Page object for each row
+- Makes all columns available as page attributes
 
 ## Key Features
 
-- **Centralized Configuration** - All insert SQL lives in `pyproject.toml` under `[tool.render-engine.pg]`
-- **Collection-Based** - Map collections to their required inserts via `insert_sql` settings
-- **Flexible Format** - Define inserts as semicolon-separated strings or as lists
-- **Backward Compatible** - Works with existing code; `collection_name` is optional
-- **Auto-Discovery** - Settings are automatically loaded from `pyproject.toml` at runtime
-- **Error Handling** - Graceful fallbacks and logging for missing settings
+- **CLI Configuration Generation** - Automatically create TOML from SQL schema
+- **Intelligent Relationship Handling** - Auto-generates JOINs for foreign keys and M2M relationships
+- **Dependency Ordering** - INSERT statements execute in correct order
+- **Array Aggregation** - Combine related data into arrays with `@aggregate` annotations
+- **Column Filtering** - Mark columns to ignore in INSERT statements with `-- ignore` comments
+- **Automatic Name Lookup** - Collections automatically use their lowercased class name to look up config
 
-## Quick Start
+## When to Use This
 
-### 1. Add Configuration to `pyproject.toml`
+✓ You have a PostgreSQL database powering your static site
+✓ You want collections from database queries instead of files
+✓ You have complex relationships (foreign keys, many-to-many)
+✓ You want configuration generated from schema, not hand-written
+✓ You need array aggregation of related records
 
-```toml
-[tool.render-engine.pg]
-insert_sql = { my_collection = "SQL QUERY1; SQL QUERY2" }
+## Typical Workflow
+
+1. **Define your database schema** with render-engine annotations
+2. **Run the CLI tool** to generate TOML configuration
+3. **Define your Collection classes** using PostgresContentManager
+4. **Build your site** - render-engine handles fetching and rendering
+
+```bash
+# Step 1: Define schema.sql with annotations
+# Step 2: Generate config
+uv run python -m render_engine_pg.cli.sql_cli schema.sql -o config.toml
+
+# Step 3: Merge config.toml into pyproject.toml
+# Step 4: Define collections in Python
+# Step 5: Build site
+uv run render-engine build
 ```
-
-### 2. Use in Your Code
-
-```python
-from render_engine_pg.parsers import PGMarkdownCollectionParser
-
-PGMarkdownCollectionParser.create_entry(
-    content="---\ntitle: Example\n---\nContent",
-    collection_name="my_collection",
-    connection=db_connection,
-    table="my_table"
-)
-```
-
-That's it! The pre-configured inserts will execute automatically.
-
-## When to Use This Feature
-
-✓ You have setup/seed data that must exist before collection entries
-✓ You want to centralize database initialization logic
-✓ You're managing multiple collections with different dependencies
-✓ You want configuration separate from code
 
 ## File Structure
 
 ```
 your-project/
-├── pyproject.toml          # Configuration with [tool.render-engine.pg]
-├── render_engine_pg/       # Your render-engine code
-│   ├── parsers.py
-│   └── re_settings_parser.py
-└── docs/                   # This documentation
+├── pyproject.toml              # Configuration with [tool.render-engine.pg]
+├── schema.sql                  # Database schema with annotations
+├── src/
+│   └── main.py                 # Collection definitions
+└── output/                     # Built site
 ```
 
-Next, learn about [configuration options](./02-configuration.md).
+Next, learn how to [configure your setup](./02-configuration.md).
