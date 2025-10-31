@@ -104,12 +104,12 @@ The `ContentManager` automatically:
 
 ## When to Use This
 
-✓ You have a PostgreSQL database powering your static site
-✓ You want collections from database queries instead of files
-✓ You have complex relationships (foreign keys, many-to-many)
-✓ You want configuration generated from schema, not hand-written
-✓ You need array aggregation of related records
-
+- You have a PostgreSQL database powering your static site
+- You want collections from database queries instead of files
+- You have complex relationships (foreign keys, many-to-many)
+- You want configuration generated from schema, not hand-written
+- You need array aggregation of related records
+ 
 ## Typical Workflow
 
 1. **Define your database schema** with render-engine annotations
