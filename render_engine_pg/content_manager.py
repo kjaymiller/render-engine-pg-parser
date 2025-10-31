@@ -1,6 +1,6 @@
 from psycopg.rows import class_row
 from render_engine.content_managers import ContentManager
-from typing import Generator, Iterable
+from typing import Generator, Iterable, Optional
 from .connection import PostgresQuery
 from .page import PGPage
 
@@ -10,12 +10,42 @@ class PostgresContentManager(ContentManager):
 
     def __init__(
         self,
-        *,
-        postgres_query: PostgresQuery,
         collection,
+        *,
+        postgres_query: Optional[PostgresQuery] = None,
+        connection: Optional[object] = None,
+        collection_name: Optional[str] = None,
         **kwargs,
     ):
-        self.postgres_query = postgres_query
+        """
+        Initialize content manager.
+
+        Args:
+            collection: The collection object
+            postgres_query: PostgresQuery with connection and SQL query (optional)
+            connection: Database connection (used with collection_name)
+            collection_name: Collection name to look up read_sql from settings
+                           (defaults to collection class name if not provided)
+        """
+        # If postgres_query is provided, use it directly
+        if postgres_query:
+            self.postgres_query = postgres_query
+        # If connection is provided, look up read_sql from settings
+        elif connection:
+            from .re_settings_parser import PGSettings
+
+            # Use provided collection_name or default to collection class name (lowercase)
+            lookup_name = collection_name or collection.__class__.__name__.lower()
+
+            settings = PGSettings()
+            query = settings.get_read_sql(lookup_name)
+            if query:
+                self.postgres_query = PostgresQuery(connection=connection, query=query)
+            else:
+                raise ValueError(f"No read_sql found for collection '{lookup_name}' in settings")
+        else:
+            raise ValueError("Either 'postgres_query' or 'connection' must be provided")
+
         self._pages = None
         self.collection = collection
 

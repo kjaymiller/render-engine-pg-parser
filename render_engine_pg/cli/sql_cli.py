@@ -41,11 +41,23 @@ from .toml_generator import TOMLConfigGenerator
     default=["pages", "collections", "attributes", "junctions"],
     help="Which object types to process (default: all)",
 )
+@click.option(
+    "--ignore-pk",
+    is_flag=True,
+    help="Automatically ignore PRIMARY KEY columns in INSERT statements",
+)
+@click.option(
+    "--ignore-timestamps",
+    is_flag=True,
+    help="Automatically ignore TIMESTAMP columns in INSERT statements",
+)
 def main(
     input_file: Path,
     output: Optional[Path],
     verbose: bool,
     objects: tuple,
+    ignore_pk: bool,
+    ignore_timestamps: bool,
 ):
     """Generate SQL insertion queries for render-engine objects from a .sql file."""
     try:
@@ -63,7 +75,7 @@ def main(
         sql_content = input_file.read_text()
 
         # Parse SQL
-        sql_parser = SQLParser()
+        sql_parser = SQLParser(ignore_pk=ignore_pk, ignore_timestamps=ignore_timestamps)
         parsed_objects = sql_parser.parse(sql_content)
 
         if verbose:

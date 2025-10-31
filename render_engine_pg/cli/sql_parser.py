@@ -24,6 +24,17 @@ class SQLObject:
 class SQLParser:
     """Parses SQL files to extract render-engine page and collection definitions"""
 
+    def __init__(self, ignore_pk: bool = False, ignore_timestamps: bool = False):
+        """
+        Initialize the SQL parser.
+
+        Args:
+            ignore_pk: If True, automatically ignore PRIMARY KEY columns
+            ignore_timestamps: If True, automatically ignore TIMESTAMP columns
+        """
+        self.ignore_pk = ignore_pk
+        self.ignore_timestamps = ignore_timestamps
+
     # Pattern for page definitions
     # Syntax: -- @page [parent_name]
     PAGE_PATTERN = re.compile(
@@ -99,7 +110,7 @@ class SQLParser:
             parent_name = match.group(1)
             table_name = match.group(2)
             columns_def = match.group(3)
-            columns = self._parse_columns(columns_def)
+            columns, ignored_columns, aggregate_columns = self._parse_columns(columns_def)
 
             obj = {
                 "name": table_name,
@@ -108,6 +119,10 @@ class SQLParser:
                 "columns": columns,
                 "attributes": {},
             }
+            if ignored_columns:
+                obj["attributes"]["ignored_columns"] = ignored_columns
+            if aggregate_columns:
+                obj["attributes"]["aggregate_columns"] = aggregate_columns
             if parent_name:
                 obj["attributes"]["parent_collection"] = parent_name
             objects.append(obj)
@@ -117,7 +132,7 @@ class SQLParser:
             parent_name = match.group(1)  # Optional parent collection name
             table_name = match.group(2)
             columns_def = match.group(3)
-            columns = self._parse_columns(columns_def)
+            columns, ignored_columns, aggregate_columns = self._parse_columns(columns_def)
 
             # Collection name defaults to table name
             collection_name = table_name
@@ -129,6 +144,10 @@ class SQLParser:
                 "columns": columns,
                 "attributes": {"collection_name": collection_name},
             }
+            if ignored_columns:
+                obj["attributes"]["ignored_columns"] = ignored_columns
+            if aggregate_columns:
+                obj["attributes"]["aggregate_columns"] = aggregate_columns
             if parent_name:
                 obj["attributes"]["parent_collection"] = parent_name
             objects.append(obj)
@@ -138,7 +157,7 @@ class SQLParser:
             parent_name = match.group(1)
             table_name = match.group(2)
             columns_def = match.group(3)
-            columns = self._parse_columns(columns_def)
+            columns, ignored_columns, aggregate_columns = self._parse_columns(columns_def)
 
             obj = {
                 "name": table_name,
@@ -147,6 +166,10 @@ class SQLParser:
                 "columns": columns,
                 "attributes": {},
             }
+            if ignored_columns:
+                obj["attributes"]["ignored_columns"] = ignored_columns
+            if aggregate_columns:
+                obj["attributes"]["aggregate_columns"] = aggregate_columns
             if parent_name:
                 obj["attributes"]["parent_collection"] = parent_name
             objects.append(obj)
@@ -156,7 +179,7 @@ class SQLParser:
             parent_name = match.group(1)
             table_name = match.group(2)
             columns_def = match.group(3)
-            columns = self._parse_columns(columns_def)
+            columns, ignored_columns, aggregate_columns = self._parse_columns(columns_def)
 
             obj = {
                 "name": table_name,
@@ -165,6 +188,10 @@ class SQLParser:
                 "columns": columns,
                 "attributes": {},
             }
+            if ignored_columns:
+                obj["attributes"]["ignored_columns"] = ignored_columns
+            if aggregate_columns:
+                obj["attributes"]["aggregate_columns"] = aggregate_columns
             if parent_name:
                 obj["attributes"]["parent_collection"] = parent_name
             objects.append(obj)
@@ -181,7 +208,7 @@ class SQLParser:
             if table_name in processed_tables:
                 continue
 
-            columns = self._parse_columns(columns_def)
+            columns, ignored_columns, aggregate_columns = self._parse_columns(columns_def)
 
             # Add as unmarked table (will be inferred from usage in junctions)
             obj = {
@@ -191,19 +218,54 @@ class SQLParser:
                 "columns": columns,
                 "attributes": {},
             }
+            if ignored_columns:
+                obj["attributes"]["ignored_columns"] = ignored_columns
+            if aggregate_columns:
+                obj["attributes"]["aggregate_columns"] = aggregate_columns
             objects.append(obj)
 
         return objects
 
-    def _parse_columns(self, columns_def: str) -> List[str]:
-        """Extract column names from column definitions."""
+    def _parse_columns(self, columns_def: str) -> tuple:
+        """
+        Extract column names from column definitions.
+
+        Returns:
+            Tuple of (columns, ignored_columns, aggregate_columns) where:
+            - columns: List of all column names
+            - ignored_columns: List of column names marked with -- ignore comment or by flags
+            - aggregate_columns: List of column names marked with @aggregate comment
+        """
         columns = []
-        # Split by comma to handle each column/constraint definition
-        for part in columns_def.split(','):
+        ignored_columns = []
+        aggregate_columns = []
+
+        # Split by lines to parse each column definition
+        # This handles -- ignore and @aggregate comments that appear on the same line as the column
+        lines = columns_def.split('\n')
+
+        for line in lines:
+            line_stripped = line.strip()
+
+            # Skip empty lines and comment-only lines
+            if not line_stripped or line_stripped.startswith('--'):
+                continue
+
+            # Remove trailing comma for processing
+            line_for_parsing = line_stripped.rstrip(',').strip()
+
+            # Check for annotations in the comment
+            has_ignore = bool(re.search(r'--\s*ignore', line_stripped, re.IGNORECASE))
+            has_aggregate = bool(re.search(r'--\s*@aggregate', line_stripped, re.IGNORECASE))
+
+            # Remove the comment part for parsing
+            col_def_no_comment = line_for_parsing.split('--')[0] if '--' in line_for_parsing else line_for_parsing
+
             # Remove parentheses and extra whitespace
-            part = part.strip().strip('()')
+            col_def_no_comment = col_def_no_comment.strip().strip('()')
+
             # Extract the first word as the column name (ignore constraints)
-            words = part.split()
+            words = col_def_no_comment.split()
             if words:
                 col_name = words[0].strip()
                 # Skip constraint keywords and empty names
@@ -211,4 +273,23 @@ class SQLParser:
                     # Avoid duplicate column names
                     if col_name not in columns:
                         columns.append(col_name)
-        return columns
+
+                        # Check if column should be ignored
+                        should_ignore = has_ignore
+
+                        # Check for PRIMARY KEY
+                        if self.ignore_pk and 'PRIMARY KEY' in line_stripped.upper():
+                            should_ignore = True
+
+                        # Check for TIMESTAMP
+                        if self.ignore_timestamps and 'TIMESTAMP' in line_stripped.upper():
+                            should_ignore = True
+
+                        if should_ignore:
+                            ignored_columns.append(col_name)
+
+                        # Check for @aggregate annotation
+                        if has_aggregate:
+                            aggregate_columns.append(col_name)
+
+        return columns, ignored_columns, aggregate_columns
