@@ -41,7 +41,28 @@ uv run python -m render_engine_pg.cli.sql_cli schema.sql -v
 
 # Filter by object types
 uv run python -m render_engine_pg.cli.sql_cli schema.sql --objects collections attributes
+
+# Exclude columns from INSERT statements (ignored columns still appear in SELECT)
+uv run python -m render_engine_pg.cli.sql_cli schema.sql --ignore-pk              # Ignore PRIMARY KEY columns
+uv run python -m render_engine_pg.cli.sql_cli schema.sql --ignore-timestamps      # Ignore TIMESTAMP columns
+uv run python -m render_engine_pg.cli.sql_cli schema.sql --ignore-pk --ignore-timestamps  # Both
 ```
+
+#### Ignoring Columns in INSERT Statements
+
+Columns can be excluded from INSERT statements in two ways:
+
+1. **Manual annotation** - Add `-- ignore` comment on the same line:
+   ```sql
+   id SERIAL PRIMARY KEY, --ignore
+   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP -- ignore
+   ```
+
+2. **CLI flags** - Automatically ignore entire column types:
+   - `--ignore-pk`: Skip all PRIMARY KEY columns
+   - `--ignore-timestamps`: Skip all TIMESTAMP columns
+
+**Note**: Ignored columns are excluded from INSERT but included in SELECT. This lets database defaults (SERIAL, CURRENT_TIMESTAMP, etc.) populate automatically while still being readable.
 
 ### Documentation
 ```bash
