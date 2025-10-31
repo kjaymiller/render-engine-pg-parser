@@ -110,7 +110,7 @@ class SQLParser:
             parent_name = match.group(1)
             table_name = match.group(2)
             columns_def = match.group(3)
-            columns, ignored_columns, aggregate_columns = self._parse_columns(columns_def)
+            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def)
 
             obj = {
                 "name": table_name,
@@ -123,6 +123,8 @@ class SQLParser:
                 obj["attributes"]["ignored_columns"] = ignored_columns
             if aggregate_columns:
                 obj["attributes"]["aggregate_columns"] = aggregate_columns
+            if unique_columns:
+                obj["attributes"]["unique_columns"] = unique_columns
             if parent_name:
                 obj["attributes"]["parent_collection"] = parent_name
             objects.append(obj)
@@ -132,7 +134,7 @@ class SQLParser:
             parent_name = match.group(1)  # Optional parent collection name
             table_name = match.group(2)
             columns_def = match.group(3)
-            columns, ignored_columns, aggregate_columns = self._parse_columns(columns_def)
+            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def)
 
             # Collection name defaults to table name
             collection_name = table_name
@@ -148,6 +150,8 @@ class SQLParser:
                 obj["attributes"]["ignored_columns"] = ignored_columns
             if aggregate_columns:
                 obj["attributes"]["aggregate_columns"] = aggregate_columns
+            if unique_columns:
+                obj["attributes"]["unique_columns"] = unique_columns
             if parent_name:
                 obj["attributes"]["parent_collection"] = parent_name
             objects.append(obj)
@@ -157,7 +161,7 @@ class SQLParser:
             parent_name = match.group(1)
             table_name = match.group(2)
             columns_def = match.group(3)
-            columns, ignored_columns, aggregate_columns = self._parse_columns(columns_def)
+            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def)
 
             obj = {
                 "name": table_name,
@@ -170,6 +174,8 @@ class SQLParser:
                 obj["attributes"]["ignored_columns"] = ignored_columns
             if aggregate_columns:
                 obj["attributes"]["aggregate_columns"] = aggregate_columns
+            if unique_columns:
+                obj["attributes"]["unique_columns"] = unique_columns
             if parent_name:
                 obj["attributes"]["parent_collection"] = parent_name
             objects.append(obj)
@@ -179,7 +185,7 @@ class SQLParser:
             parent_name = match.group(1)
             table_name = match.group(2)
             columns_def = match.group(3)
-            columns, ignored_columns, aggregate_columns = self._parse_columns(columns_def)
+            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def)
 
             obj = {
                 "name": table_name,
@@ -192,6 +198,8 @@ class SQLParser:
                 obj["attributes"]["ignored_columns"] = ignored_columns
             if aggregate_columns:
                 obj["attributes"]["aggregate_columns"] = aggregate_columns
+            if unique_columns:
+                obj["attributes"]["unique_columns"] = unique_columns
             if parent_name:
                 obj["attributes"]["parent_collection"] = parent_name
             objects.append(obj)
@@ -208,7 +216,7 @@ class SQLParser:
             if table_name in processed_tables:
                 continue
 
-            columns, ignored_columns, aggregate_columns = self._parse_columns(columns_def)
+            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def)
 
             # Add as unmarked table (will be inferred from usage in junctions)
             obj = {
@@ -222,6 +230,8 @@ class SQLParser:
                 obj["attributes"]["ignored_columns"] = ignored_columns
             if aggregate_columns:
                 obj["attributes"]["aggregate_columns"] = aggregate_columns
+            if unique_columns:
+                obj["attributes"]["unique_columns"] = unique_columns
             objects.append(obj)
 
         return objects
@@ -231,14 +241,16 @@ class SQLParser:
         Extract column names from column definitions.
 
         Returns:
-            Tuple of (columns, ignored_columns, aggregate_columns) where:
+            Tuple of (columns, ignored_columns, aggregate_columns, unique_columns) where:
             - columns: List of all column names
             - ignored_columns: List of column names marked with -- ignore comment or by flags
             - aggregate_columns: List of column names marked with @aggregate comment
+            - unique_columns: List of column names with UNIQUE constraint
         """
         columns = []
         ignored_columns = []
         aggregate_columns = []
+        unique_columns = []
 
         # Split by lines to parse each column definition
         # This handles -- ignore and @aggregate comments that appear on the same line as the column
@@ -257,6 +269,7 @@ class SQLParser:
             # Check for annotations in the comment
             has_ignore = bool(re.search(r'--\s*ignore', line_stripped, re.IGNORECASE))
             has_aggregate = bool(re.search(r'--\s*@aggregate', line_stripped, re.IGNORECASE))
+            has_unique = bool(re.search(r'\bUNIQUE\b', line_stripped, re.IGNORECASE))
 
             # Remove the comment part for parsing
             col_def_no_comment = line_for_parsing.split('--')[0] if '--' in line_for_parsing else line_for_parsing
@@ -292,4 +305,8 @@ class SQLParser:
                         if has_aggregate:
                             aggregate_columns.append(col_name)
 
-        return columns, ignored_columns, aggregate_columns
+                        # Check for UNIQUE constraint
+                        if has_unique:
+                            unique_columns.append(col_name)
+
+        return columns, ignored_columns, aggregate_columns, unique_columns

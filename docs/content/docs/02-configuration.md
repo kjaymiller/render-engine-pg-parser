@@ -94,13 +94,17 @@ This creates `insert_sql` entries like:
 ```toml
 [tool.render-engine.pg.insert_sql]
 blog = [
-    "INSERT INTO tags (name) VALUES ('Technology'), ('Travel'), ('Lifestyle') ON CONFLICT (name) DO NOTHING;",
-    "INSERT INTO blog_tags (blog_id, tag_id) VALUES (1, 1), (1, 2) ON CONFLICT DO NOTHING;",
-    "INSERT INTO blog (slug, title, content, date) VALUES ('my-post', 'My Post', '...', NOW());"
+    "INSERT INTO tags (name) VALUES ({name}) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id;",
+    "INSERT INTO blog_tags (blog_id, tag_id) VALUES ({blog_id}, {tag_id});",
+    "INSERT INTO blog (slug, title, content, date) VALUES ({slug}, {title}, {date});"
 ]
 ```
 
-**Important:** Reference data and junction table INSERTs use `ON CONFLICT DO NOTHING` to safely handle repeated runs without duplicate key errors.
+**Get-or-Create Pattern:** For attribute tables with UNIQUE constraints, the CLI generates `ON CONFLICT ... DO UPDATE ... RETURNING id` queries. This safely handles repeated runs:
+- If the record doesn't exist → insert and return the new ID
+- If the record exists → "update" it (no actual change) and return the existing ID
+
+This allows junction table inserts to reference the correct ID even if the attribute already exists.
 
 #### How It's Generated
 

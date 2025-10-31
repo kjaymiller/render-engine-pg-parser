@@ -155,9 +155,9 @@ CREATE TABLE IF NOT EXISTS categories (
 ```toml
 [tool.render-engine.pg.insert_sql]
 posts = [
-    "INSERT INTO authors (name) VALUES (...)",
-    "INSERT INTO categories (name) VALUES (...)",
-    "INSERT INTO posts (slug, title, content, author_id, category_id) VALUES (...)"
+    "INSERT INTO authors (name) VALUES ({name}) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id;",
+    "INSERT INTO categories (name) VALUES ({name}) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id;",
+    "INSERT INTO posts (slug, title, content, author_id, category_id) VALUES ({slug}, {title}, {content}, {author_id}, {category_id});"
 ]
 
 [tool.render-engine.pg.read_sql]
@@ -283,13 +283,13 @@ The CLI automatically:
 ```toml
 [tool.render-engine.pg.insert_sql]
 blog = [
-    "INSERT INTO tags (name) VALUES ('Technology'), ('Travel') ON CONFLICT (name) DO NOTHING;",
-    "INSERT INTO blog_tags (blog_id, tag_id) VALUES (1, 1), (1, 2) ON CONFLICT DO NOTHING;",
-    "INSERT INTO blog (slug, title, content, date) VALUES ('my-post', 'My Post', '...', NOW());"
+    "INSERT INTO tags (name) VALUES ({name}) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id;",
+    "INSERT INTO blog_tags (blog_id, tag_id) VALUES ({blog_id}, {tag_id});",
+    "INSERT INTO blog (slug, title, content, date) VALUES ({slug}, {title}, {date});"
 ]
 ```
 
-The INSERT statements execute in order when data is being set up through render-engine. Reference data and junction table INSERTs use `ON CONFLICT DO NOTHING` to safely handle repeated runs.
+The INSERT statements execute in order when data is being set up. Attribute tables with UNIQUE constraints use the get-or-create pattern (`ON CONFLICT ... DO UPDATE ... RETURNING id`) to safely handle repeated runs while capturing the correct ID for relationships.
 
 ## Working with the CLI Tool
 

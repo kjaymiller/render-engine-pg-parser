@@ -179,11 +179,10 @@ blog = "SELECT blog.id, blog.slug, blog.title, blog.content FROM blog ORDER BY d
 docs = "SELECT docs.id, docs.slug, docs.content FROM docs"
 
 [tool.render-engine.pg.insert_sql]
-# Dependency-ordered INSERT statements
-# Reference data and junction tables use ON CONFLICT DO NOTHING for safe repeated runs
+# Dependency-ordered INSERT statements with get-or-create pattern for attributes
 blog = [
-    "INSERT INTO tags (name) VALUES (...) ON CONFLICT DO NOTHING;",
-    "INSERT INTO blog_tags (blog_id, tag_id) VALUES (...) ON CONFLICT DO NOTHING;",
+    "INSERT INTO tags (name) VALUES (...) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id;",
+    "INSERT INTO blog_tags (blog_id, tag_id) VALUES (...);",
     "INSERT INTO blog (slug, title, content, date) VALUES (...);"
 ]
 ```

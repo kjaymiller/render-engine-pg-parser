@@ -101,6 +101,8 @@ class InsertionQueryGenerator:
         table = obj["table"]
         columns = obj["columns"]
         ignored_columns = obj.get("attributes", {}).get("ignored_columns", [])
+        unique_columns = obj.get("attributes", {}).get("unique_columns", [])
+        obj_type = obj.get("type", "").lower()
 
         # Filter out ignored columns
         columns_to_insert = [col for col in columns if col not in ignored_columns]
@@ -135,7 +137,15 @@ class InsertionQueryGenerator:
         values_str = ", ".join(values)
 
         # Build INSERT statement
-        insert_stmt = f"INSERT INTO {table} ({col_str})\nVALUES ({values_str});"
+        insert_stmt = f"INSERT INTO {table} ({col_str})\nVALUES ({values_str})"
+
+        # For attributes and junctions, add ON CONFLICT ... DO UPDATE ... RETURNING id
+        if obj_type in ("attribute", "junction") and unique_columns:
+            # Use the first unique column as conflict target
+            unique_col = unique_columns[0]
+            insert_stmt += f" ON CONFLICT ({unique_col}) DO UPDATE SET {unique_col} = EXCLUDED.{unique_col} RETURNING id"
+
+        insert_stmt += ";"
 
         query_parts.append(insert_stmt)
 
