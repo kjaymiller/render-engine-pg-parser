@@ -100,16 +100,20 @@ class InsertionQueryGenerator:
         """
         table = obj["table"]
         columns = obj["columns"]
+        ignored_columns = obj.get("attributes", {}).get("ignored_columns", [])
+
+        # Filter out ignored columns
+        columns_to_insert = [col for col in columns if col not in ignored_columns]
 
         # Generate comment
         query_parts = [f"-- Insert {obj['type'].capitalize()}: {obj['name']}"]
 
         # Build column list and placeholder values
-        col_str = ", ".join(columns)
+        col_str = ", ".join(columns_to_insert)
 
         # Generate example values using {key} placeholders
         values = []
-        for col in columns:
+        for col in columns_to_insert:
             # Check if this column is a foreign key
             is_fk = any(
                 rel["column"] == col and rel["source"] == obj["name"]

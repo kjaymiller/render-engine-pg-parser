@@ -24,6 +24,17 @@ class SQLObject:
 class SQLParser:
     """Parses SQL files to extract render-engine page and collection definitions"""
 
+    def __init__(self, ignore_pk: bool = False, ignore_timestamps: bool = False):
+        """
+        Initialize the SQL parser.
+
+        Args:
+            ignore_pk: If True, automatically ignore PRIMARY KEY columns
+            ignore_timestamps: If True, automatically ignore TIMESTAMP columns
+        """
+        self.ignore_pk = ignore_pk
+        self.ignore_timestamps = ignore_timestamps
+
     # Pattern for page definitions
     # Syntax: -- @page [parent_name]
     PAGE_PATTERN = re.compile(
@@ -99,7 +110,7 @@ class SQLParser:
             parent_name = match.group(1)
             table_name = match.group(2)
             columns_def = match.group(3)
-            columns = self._parse_columns(columns_def)
+            columns, ignored_columns = self._parse_columns(columns_def)
 
             obj = {
                 "name": table_name,
@@ -108,6 +119,8 @@ class SQLParser:
                 "columns": columns,
                 "attributes": {},
             }
+            if ignored_columns:
+                obj["attributes"]["ignored_columns"] = ignored_columns
             if parent_name:
                 obj["attributes"]["parent_collection"] = parent_name
             objects.append(obj)
@@ -117,7 +130,7 @@ class SQLParser:
             parent_name = match.group(1)  # Optional parent collection name
             table_name = match.group(2)
             columns_def = match.group(3)
-            columns = self._parse_columns(columns_def)
+            columns, ignored_columns = self._parse_columns(columns_def)
 
             # Collection name defaults to table name
             collection_name = table_name
@@ -129,6 +142,8 @@ class SQLParser:
                 "columns": columns,
                 "attributes": {"collection_name": collection_name},
             }
+            if ignored_columns:
+                obj["attributes"]["ignored_columns"] = ignored_columns
             if parent_name:
                 obj["attributes"]["parent_collection"] = parent_name
             objects.append(obj)
@@ -138,7 +153,7 @@ class SQLParser:
             parent_name = match.group(1)
             table_name = match.group(2)
             columns_def = match.group(3)
-            columns = self._parse_columns(columns_def)
+            columns, ignored_columns = self._parse_columns(columns_def)
 
             obj = {
                 "name": table_name,
@@ -147,6 +162,8 @@ class SQLParser:
                 "columns": columns,
                 "attributes": {},
             }
+            if ignored_columns:
+                obj["attributes"]["ignored_columns"] = ignored_columns
             if parent_name:
                 obj["attributes"]["parent_collection"] = parent_name
             objects.append(obj)
@@ -156,7 +173,7 @@ class SQLParser:
             parent_name = match.group(1)
             table_name = match.group(2)
             columns_def = match.group(3)
-            columns = self._parse_columns(columns_def)
+            columns, ignored_columns = self._parse_columns(columns_def)
 
             obj = {
                 "name": table_name,
@@ -165,6 +182,8 @@ class SQLParser:
                 "columns": columns,
                 "attributes": {},
             }
+            if ignored_columns:
+                obj["attributes"]["ignored_columns"] = ignored_columns
             if parent_name:
                 obj["attributes"]["parent_collection"] = parent_name
             objects.append(obj)
@@ -181,7 +200,7 @@ class SQLParser:
             if table_name in processed_tables:
                 continue
 
-            columns = self._parse_columns(columns_def)
+            columns, ignored_columns = self._parse_columns(columns_def)
 
             # Add as unmarked table (will be inferred from usage in junctions)
             obj = {
@@ -191,19 +210,37 @@ class SQLParser:
                 "columns": columns,
                 "attributes": {},
             }
+            if ignored_columns:
+                obj["attributes"]["ignored_columns"] = ignored_columns
             objects.append(obj)
 
         return objects
 
-    def _parse_columns(self, columns_def: str) -> List[str]:
-        """Extract column names from column definitions."""
+    def _parse_columns(self, columns_def: str) -> tuple:
+        """
+        Extract column names from column definitions.
+
+        Returns:
+            Tuple of (columns, ignored_columns) where:
+            - columns: List of all column names
+            - ignored_columns: List of column names marked with -- ignore comment or by flags
+        """
         columns = []
+        ignored_columns = []
+
         # Split by comma to handle each column/constraint definition
         for part in columns_def.split(','):
+            # Check if this line has an -- ignore comment
+            has_ignore = '-- ignore' in part.lower()
+
+            # Remove the comment part for parsing
+            part_without_comment = part.split('--')[0] if '--' in part else part
+
             # Remove parentheses and extra whitespace
-            part = part.strip().strip('()')
+            part_without_comment = part_without_comment.strip().strip('()')
+
             # Extract the first word as the column name (ignore constraints)
-            words = part.split()
+            words = part_without_comment.split()
             if words:
                 col_name = words[0].strip()
                 # Skip constraint keywords and empty names
@@ -211,4 +248,19 @@ class SQLParser:
                     # Avoid duplicate column names
                     if col_name not in columns:
                         columns.append(col_name)
-        return columns
+
+                        # Check if column should be ignored
+                        should_ignore = has_ignore
+
+                        # Check for PRIMARY KEY
+                        if self.ignore_pk and 'PRIMARY KEY' in part.upper():
+                            should_ignore = True
+
+                        # Check for TIMESTAMP
+                        if self.ignore_timestamps and 'TIMESTAMP' in part.upper():
+                            should_ignore = True
+
+                        if should_ignore:
+                            ignored_columns.append(col_name)
+
+        return columns, ignored_columns
