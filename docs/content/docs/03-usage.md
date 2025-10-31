@@ -283,13 +283,13 @@ The CLI automatically:
 ```toml
 [tool.render-engine.pg.insert_sql]
 blog = [
-    "INSERT INTO tags (name) VALUES ('Technology'), ('Travel')",
-    "INSERT INTO blog_tags (blog_id, tag_id) VALUES (1, 1), (1, 2)",
-    "INSERT INTO blog (slug, title, content, date) VALUES ('my-post', 'My Post', '...', NOW())"
+    "INSERT INTO tags (name) VALUES ('Technology'), ('Travel') ON CONFLICT (name) DO NOTHING;",
+    "INSERT INTO blog_tags (blog_id, tag_id) VALUES (1, 1), (1, 2) ON CONFLICT DO NOTHING;",
+    "INSERT INTO blog (slug, title, content, date) VALUES ('my-post', 'My Post', '...', NOW());"
 ]
 ```
 
-The INSERT statements execute in order when data is being set up through render-engine.
+The INSERT statements execute in order when data is being set up through render-engine. Reference data and junction table INSERTs use `ON CONFLICT DO NOTHING` to safely handle repeated runs.
 
 ## Working with the CLI Tool
 

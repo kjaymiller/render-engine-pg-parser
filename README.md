@@ -180,10 +180,11 @@ docs = "SELECT docs.id, docs.slug, docs.content FROM docs"
 
 [tool.render-engine.pg.insert_sql]
 # Dependency-ordered INSERT statements
+# Reference data and junction tables use ON CONFLICT DO NOTHING for safe repeated runs
 blog = [
-    "INSERT INTO tags (name) VALUES (...)",
-    "INSERT INTO blog_tags (blog_id, tag_id) VALUES (...)",
-    "INSERT INTO blog (slug, title, content, date) VALUES (...)"
+    "INSERT INTO tags (name) VALUES (...) ON CONFLICT DO NOTHING;",
+    "INSERT INTO blog_tags (blog_id, tag_id) VALUES (...) ON CONFLICT DO NOTHING;",
+    "INSERT INTO blog (slug, title, content, date) VALUES (...);"
 ]
 ```
 

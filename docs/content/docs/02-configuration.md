@@ -94,11 +94,13 @@ This creates `insert_sql` entries like:
 ```toml
 [tool.render-engine.pg.insert_sql]
 blog = [
-    "INSERT INTO tags (name) VALUES ('Technology'), ('Travel'), ('Lifestyle')",
-    "INSERT INTO blog_tags (blog_id, tag_id) VALUES (1, 1), (1, 2)",
-    "INSERT INTO blog (slug, title, content, date) VALUES ('my-post', 'My Post', '...', NOW())"
+    "INSERT INTO tags (name) VALUES ('Technology'), ('Travel'), ('Lifestyle') ON CONFLICT (name) DO NOTHING;",
+    "INSERT INTO blog_tags (blog_id, tag_id) VALUES (1, 1), (1, 2) ON CONFLICT DO NOTHING;",
+    "INSERT INTO blog (slug, title, content, date) VALUES ('my-post', 'My Post', '...', NOW());"
 ]
 ```
+
+**Important:** Reference data and junction table INSERTs use `ON CONFLICT DO NOTHING` to safely handle repeated runs without duplicate key errors.
 
 #### How It's Generated
 
@@ -194,12 +196,12 @@ read_sql = {
 
 insert_sql = {
     blog = [
-        "INSERT INTO tags (name) VALUES ('Technology'), ('Travel')",
-        "INSERT INTO blog_tags (blog_id, tag_id) VALUES (1, 1), (1, 2)",
-        "INSERT INTO blog (slug, title, content, date) VALUES ('my-post', 'My Post', '...', NOW())"
+        "INSERT INTO tags (name) VALUES ('Technology'), ('Travel') ON CONFLICT (name) DO NOTHING;",
+        "INSERT INTO blog_tags (blog_id, tag_id) VALUES (1, 1), (1, 2) ON CONFLICT DO NOTHING;",
+        "INSERT INTO blog (slug, title, content, date) VALUES ('my-post', 'My Post', '...', NOW());"
     ],
     docs = [
-        "INSERT INTO docs (slug, title, content) VALUES ('about', 'About', '...')"
+        "INSERT INTO docs (slug, title, content) VALUES ('about', 'About', '...');"
     ]
 }
 ```
