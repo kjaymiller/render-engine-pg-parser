@@ -39,7 +39,11 @@ class ReadQueryGenerator:
         relationships: List[Dict[str, Any]],
     ) -> str:
         """
-        Generate a SELECT query for a single object with JOINs.
+        Generate a SELECT query for an object with JOINs.
+
+        For collections: Returns all rows (no WHERE clause)
+        For pages: Returns single row (WHERE id = {id})
+        For attributes/junctions: Returns all rows
 
         Args:
             obj: Object to generate query for
@@ -108,8 +112,18 @@ class ReadQueryGenerator:
             join_clause2 = f"LEFT JOIN {target_table} ON {junction_table}.{target_fk_col} = {target_table}.id"
             query_parts.append(join_clause2)
 
-        # Add WHERE clause with placeholder
-        query_parts.append(f"WHERE {table}.id = {{id}};")
+        # Add WHERE clause based on object type
+        # Pages: Single item lookup by ID
+        # Collections/Attributes: All items (no WHERE clause)
+        if obj_type == "page":
+            query_parts.append(f"WHERE {table}.id = {{id}};")
+        else:
+            # Collections and attributes - fetch all items
+            # Add ORDER BY for better defaults (by id, or by date if available)
+            if "date" in obj["columns"]:
+                query_parts.append(f"ORDER BY {table}.date DESC;")
+            else:
+                query_parts.append(";")
 
         return " ".join(query_parts)
 
