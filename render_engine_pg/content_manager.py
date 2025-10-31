@@ -10,9 +10,9 @@ class PostgresContentManager(ContentManager):
 
     def __init__(
         self,
+        collection,
         *,
         postgres_query: Optional[PostgresQuery] = None,
-        collection,
         connection: Optional[object] = None,
         collection_name: Optional[str] = None,
         **kwargs,
@@ -21,25 +21,30 @@ class PostgresContentManager(ContentManager):
         Initialize content manager.
 
         Args:
-            postgres_query: PostgresQuery with connection and SQL query (optional)
             collection: The collection object
+            postgres_query: PostgresQuery with connection and SQL query (optional)
             connection: Database connection (used with collection_name)
             collection_name: Collection name to look up read_sql from settings
+                           (defaults to collection class name if not provided)
         """
         # If postgres_query is provided, use it directly
         if postgres_query:
             self.postgres_query = postgres_query
-        # If collection_name is provided, look up read_sql from settings
-        elif collection_name and connection:
+        # If connection is provided, look up read_sql from settings
+        elif connection:
             from .re_settings_parser import PGSettings
+
+            # Use provided collection_name or default to collection class name (lowercase)
+            lookup_name = collection_name or collection.__class__.__name__.lower()
+
             settings = PGSettings()
-            query = settings.get_read_sql(collection_name)
+            query = settings.get_read_sql(lookup_name)
             if query:
                 self.postgres_query = PostgresQuery(connection=connection, query=query)
             else:
-                raise ValueError(f"No read_sql found for collection '{collection_name}' in settings")
+                raise ValueError(f"No read_sql found for collection '{lookup_name}' in settings")
         else:
-            raise ValueError("Either 'postgres_query' or both 'connection' and 'collection_name' must be provided")
+            raise ValueError("Either 'postgres_query' or 'connection' must be provided")
 
         self._pages = None
         self.collection = collection
