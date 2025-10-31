@@ -75,18 +75,14 @@ class ReadQueryGenerator:
 
         # Build the SELECT clause
         select_cols = [f"{table}.{col}" for col in obj["columns"]]
+        agg_cols = []  # For array_agg columns
 
-        # For collections/attributes with many-to-many relationships, use DISTINCT ON
-        # to avoid duplicate rows from JOINs
+        # For collections with many-to-many relationships, use GROUP BY with array_agg
         has_many_to_many = bool(many_to_many)
         is_collection = obj_type == "collection"
 
-        if is_collection and has_many_to_many:
-            # Use DISTINCT ON (id) to get one row per main object
-            query_parts = [f"SELECT DISTINCT ON ({table}.id) {', '.join(select_cols)}"]
-        else:
-            # Regular SELECT for pages and objects without M2M relationships
-            query_parts = [f"SELECT {', '.join(select_cols)}"]
+        # Start with basic SELECT (we'll add array_agg columns later)
+        query_parts = [f"SELECT {', '.join(select_cols)}"]
 
         # Add FROM clause
         query_parts.append(f"FROM {table}")
@@ -121,6 +117,31 @@ class ReadQueryGenerator:
             join_clause2 = f"LEFT JOIN {target_table} ON {junction_table}.{target_fk_col} = {target_table}.id"
             query_parts.append(join_clause2)
 
+            # For collections with M2M, aggregate the related table's columns into arrays
+            if is_collection:
+                # Get target object to access its columns
+                target_obj = next(
+                    (o for o in all_objects if o["name"] == target_name),
+                    None
+                )
+                if target_obj:
+                    # Get columns marked for aggregation
+                    aggregate_columns = target_obj.get("attributes", {}).get("aggregate_columns", [])
+
+                    # Create array_agg columns only for columns marked with @aggregate
+                    if aggregate_columns:
+                        for col in aggregate_columns:
+                            agg_cols.append(f"array_agg(DISTINCT {target_table}.{col}) as {target_table}_{col}s")
+                    else:
+                        # If no @aggregate annotations, skip aggregation (user must explicitly mark)
+                        pass
+
+        # Add array_agg columns to SELECT if we have any
+        if agg_cols:
+            # Modify the SELECT statement to include array_agg columns
+            select_with_aggs = f"SELECT {', '.join(select_cols)}, {', '.join(agg_cols)}"
+            query_parts[0] = select_with_aggs
+
         # Add WHERE clause based on object type
         # Pages: Single item lookup by ID
         # Collections/Attributes: All items (no WHERE clause)
@@ -128,19 +149,17 @@ class ReadQueryGenerator:
             query_parts.append(f"WHERE {table}.id = {{id}};")
         else:
             # Collections and attributes - fetch all items
-            # For DISTINCT ON queries, ORDER BY must start with the DISTINCT ON column
-            if is_collection and has_many_to_many:
-                # Must order by the DISTINCT ON column first, then other columns
-                if "date" in obj["columns"]:
-                    query_parts.append(f"ORDER BY {table}.id, {table}.date DESC;")
-                else:
-                    query_parts.append(f"ORDER BY {table}.id;")
+            # If we have aggregate columns, we need GROUP BY
+            if agg_cols:
+                # Group by all main table columns
+                group_by_clause = f"GROUP BY {', '.join([f'{table}.{col}' for col in obj['columns']])}"
+                query_parts.append(group_by_clause)
+
+            # Add ORDER BY
+            if "date" in obj["columns"]:
+                query_parts.append(f"ORDER BY {table}.date DESC;")
             else:
-                # No DISTINCT ON needed, can order by any column
-                if "date" in obj["columns"]:
-                    query_parts.append(f"ORDER BY {table}.date DESC;")
-                else:
-                    query_parts.append(";")
+                query_parts.append(";")
 
         return " ".join(query_parts)
 
