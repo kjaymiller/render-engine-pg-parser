@@ -345,23 +345,67 @@ class Posts(Collection):
 
 ### Multiple Collections from Same Database
 
+Define multiple collections, each with its own configuration from `pyproject.toml`:
+
 ```python
 @site.collection
-class Posts(Collection):
+class Blog(Collection):
+    """Blog posts with tags"""
     ContentManager = PostgresContentManager
     content_manager_extras = {"connection": connection}
     parser = PGPageParser
     routes = ["blog/{slug}/"]
 
 @site.collection
+class Microblog(Collection):
+    """Short-form posts with tags"""
+    ContentManager = PostgresContentManager
+    content_manager_extras = {"connection": connection}
+    parser = PGPageParser
+    routes = ["micro/{slug}/"]
+
+@site.collection
 class Documentation(Collection):
+    """API documentation pages"""
     ContentManager = PostgresContentManager
     content_manager_extras = {"connection": connection}
     parser = PGPageParser
     routes = ["docs/{slug}/"]
 ```
 
-Both use their own `read_sql` query from `pyproject.toml`.
+**Configuration in `pyproject.toml`:**
+
+```toml
+[tool.render-engine.pg.read_sql]
+blog = "SELECT blog.id, blog.slug, blog.title, blog.content, blog.date, array_agg(DISTINCT tags.name) as tags_names FROM blog LEFT JOIN blog_tags ON blog.id = blog_tags.blog_id LEFT JOIN tags ON blog_tags.tag_id = tags.id GROUP BY blog.id ORDER BY blog.date DESC;"
+
+microblog = "SELECT microblog.id, microblog.slug, microblog.content, microblog.external_link, microblog.created_at, array_agg(DISTINCT tags.name) as tags_names FROM microblog LEFT JOIN microblog_tags ON microblog.id = microblog_tags.microblog_id LEFT JOIN tags ON microblog_tags.tag_id = tags.id GROUP BY microblog.id ORDER BY microblog.created_at DESC;"
+
+documentation = "SELECT id, slug, title, content, version FROM documentation ORDER BY version DESC;"
+
+[tool.render-engine.pg.insert_sql]
+blog = [
+    "INSERT INTO tags (name) VALUES ({name}) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id;",
+    "INSERT INTO blog (slug, title, content, date) VALUES ({slug}, {title}, {content}, {date});",
+    "INSERT INTO blog_tags (blog_id, tag_id) VALUES ({blog_id}, {tag_id});"
+]
+
+microblog = [
+    "INSERT INTO tags (name) VALUES ({name}) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id;",
+    "INSERT INTO microblog (slug, content, external_link, created_at) VALUES ({slug}, {content}, {external_link}, {created_at});",
+    "INSERT INTO microblog_tags (microblog_id, tag_id) VALUES ({microblog_id}, {tag_id});"
+]
+
+documentation = [
+    "INSERT INTO documentation (slug, title, content, version) VALUES ({slug}, {title}, {content}, {version});"
+]
+```
+
+**Key Points:**
+- Each collection's Python class name (lowercased) must match the dictionary key in `read_sql` and `insert_sql`
+- Collections can share attributes (like `tags`) - the CLI automatically includes shared attributes in each collection's INSERT list
+- Each collection independently fetches its data using its own `read_sql` query
+- Shared attributes use the `ON CONFLICT` pattern to avoid duplicates across collections
 
 ### With Custom Connection String
 
