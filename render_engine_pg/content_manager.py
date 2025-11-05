@@ -73,7 +73,6 @@ class PostgresContentManager(ContentManager):
                 self._pages.append(page)
         yield from self._pages
 
-    @abstractmethod
     def create_entry(
         self,
         filepath: Path = None,
