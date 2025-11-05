@@ -140,7 +140,9 @@ def main(
             click.echo("Generating TOML configuration...", err=True)
 
         toml_generator = TOMLConfigGenerator()
-        output_content = toml_generator.generate(ordered_objects, insert_queries, read_queries)
+        output_content = toml_generator.generate(
+            ordered_objects, insert_queries, read_queries, relationships
+        )
 
         # Write output
         if output:

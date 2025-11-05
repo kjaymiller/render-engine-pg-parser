@@ -160,24 +160,100 @@ The ignored columns:
 
 #### Multiple Collections
 
+When your database has multiple collections, each gets its own separate entry in `insert_sql` and `read_sql`. This allows independent management of each collection's data setup and queries.
+
+**Schema with Multiple Collections:**
+
+```sql
+-- @collection
+CREATE TABLE blog (
+    id SERIAL PRIMARY KEY,
+    slug VARCHAR(255),
+    title VARCHAR(255),
+    content TEXT,
+    date TIMESTAMP
+);
+
+-- @collection
+CREATE TABLE microblog (
+    id SERIAL PRIMARY KEY,
+    slug VARCHAR(255),
+    content TEXT,
+    external_link VARCHAR(255),
+    created_at TIMESTAMP
+);
+
+-- @attribute (shared between both collections)
+CREATE TABLE tags (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) UNIQUE
+);
+
+-- @junction
+CREATE TABLE blog_tags (
+    blog_id INTEGER REFERENCES blog(id),
+    tag_id INTEGER REFERENCES tags(id)
+);
+
+-- @junction
+CREATE TABLE microblog_tags (
+    microblog_id INTEGER REFERENCES microblog(id),
+    tag_id INTEGER REFERENCES tags(id)
+);
+```
+
+**Generated Configuration:**
+
 ```toml
 [tool.render-engine.pg.insert_sql]
+# Blog collection with its own queries
 blog = [
-    "INSERT INTO tags ...",
-    "INSERT INTO blog_tags ...",
-    "INSERT INTO blog ..."
+    "INSERT INTO tags (name) VALUES ({name}) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id;",
+    "INSERT INTO blog (slug, title, content, date) VALUES ({slug}, {title}, {content}, {date});",
+    "INSERT INTO blog_tags (blog_id, tag_id) VALUES ({blog_id}, {tag_id});"
 ]
 
-docs = [
-    "INSERT INTO doc_versions ...",
-    "INSERT INTO docs ..."
+# Microblog collection with its own queries
+microblog = [
+    "INSERT INTO tags (name) VALUES ({name}) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id;",
+    "INSERT INTO microblog (slug, content, external_link, created_at) VALUES ({slug}, {content}, {external_link}, {created_at});",
+    "INSERT INTO microblog_tags (microblog_id, tag_id) VALUES ({microblog_id}, {tag_id});"
 ]
 
-products = [
-    "INSERT INTO suppliers ...",
-    "INSERT INTO products ..."
-]
+[tool.render-engine.pg.read_sql]
+blog = "SELECT blog.id, blog.slug, blog.title, blog.content, blog.date, array_agg(DISTINCT tags.name) as tags_names FROM blog LEFT JOIN blog_tags ON blog.id = blog_tags.blog_id LEFT JOIN tags ON blog_tags.tag_id = tags.id GROUP BY blog.id ORDER BY blog.date DESC;"
+
+microblog = "SELECT microblog.id, microblog.slug, microblog.content, microblog.external_link, microblog.created_at, array_agg(DISTINCT tags.name) as tags_names FROM microblog LEFT JOIN microblog_tags ON microblog.id = microblog_tags.microblog_id LEFT JOIN tags ON microblog_tags.tag_id = tags.id GROUP BY microblog.id ORDER BY microblog.created_at DESC;"
 ```
+
+**Key Points:**
+
+- **Separate Entries**: Each collection has its own list under `[tool.render-engine.pg.insert_sql]`
+- **Shared Attributes**: The `tags` attribute is included in both collections' INSERT lists. The `ON CONFLICT` pattern ensures the same tag isn't duplicated across collections
+- **Independent Queries**: Each collection's `read_sql` uses its own SELECT with appropriate JOINs
+- **Collection Naming**: The dictionary key (e.g., `blog`, `microblog`) must match the lowercased class name in your Python code
+
+**Python Usage:**
+
+```python
+@site.collection
+class Blog(Collection):
+    """Blog posts with tags"""
+    ContentManager = PostgresContentManager
+    content_manager_extras = {"connection": connection}
+    parser = PGPageParser
+    routes = ["blog/{slug}/"]
+
+@site.collection
+class Microblog(Collection):
+    """Short-form posts with tags"""
+    ContentManager = PostgresContentManager
+    content_manager_extras = {"connection": connection}
+    parser = PGPageParser
+    routes = ["micro/{slug}/"]
+```
+
+Each collection automatically uses its corresponding configuration from `pyproject.toml`.
 
 ## Complete Configuration Example
 
