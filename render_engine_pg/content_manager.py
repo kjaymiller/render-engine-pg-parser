@@ -42,7 +42,9 @@ class PostgresContentManager(ContentManager):
             if query:
                 self.postgres_query = PostgresQuery(connection=connection, query=query)
             else:
-                raise ValueError(f"No read_sql found for collection '{lookup_name}' in settings")
+                raise ValueError(
+                    f"No read_sql found for collection '{lookup_name}' in settings"
+                )
         else:
             raise ValueError("Either 'postgres_query' or 'connection' must be provided")
 
@@ -70,6 +72,27 @@ class PostgresContentManager(ContentManager):
                 page.content = self.collection.Parser.parse(page.content)
                 self._pages.append(page)
         yield from self._pages
+
+    @abstractmethod
+    def create_entry(
+        self,
+        filepath: Path = None,
+        editor: str = None,
+        metadata: dict = None,
+        content: str = None,
+    ):
+        """Create a new entry"""
+
+        if not filepath:
+            raise ValueError("filepath needs to be specified.")
+
+        parsed_content = self.collection.Parser.create_entry(
+            content=content, **metadata
+        )
+        filepath.write_text(parsed_content)
+        if editor:
+            subprocess.run([editor, filepath])
+        return f"New entry created at {filepath} ."
 
     def __iter__(self):
         yield from self.pages
