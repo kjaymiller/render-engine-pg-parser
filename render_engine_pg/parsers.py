@@ -48,6 +48,27 @@ class PGPageParser(BasePageParser):
 
 class PGMarkdownCollectionParser(MarkdownPageParser):
     @staticmethod
+    def parse(content: str, extras: dict[str, any] | None = None) -> str:
+        """
+        Parse markdown content with default extras enabled.
+        Ensures fenced code blocks and other common markdown features are available.
+        """
+        # Default markdown extras to enable fenced code blocks and other features
+        default_extras = ["fenced-code-blocks", "tables", "footnotes"]
+
+        # If extras dict is provided, use its markdown_extras; otherwise use defaults
+        if extras and "markdown_extras" in extras:
+            markdown_extras = extras["markdown_extras"]
+        else:
+            markdown_extras = default_extras
+
+        # Call parent class parse with the extras dict
+        return MarkdownPageParser.parse(
+            content,
+            extras={"markdown_extras": markdown_extras}
+        )
+
+    @staticmethod
     def create_entry(*, content: str = "Hello World", **kwargs) -> str:
         """
         Creates a new entry: inserts markdown content to database and executes template queries.
