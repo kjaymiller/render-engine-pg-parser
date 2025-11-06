@@ -297,6 +297,10 @@ class InteractiveClassifier:
         # Pages are standalone and don't have parent collections
         parent_collection = None
         if object_type in (ObjectType.ATTRIBUTE, ObjectType.JUNCTION):
+            # Check if this is a shared lookup table (referenced by multiple junction tables)
+            # These should not have a parent collection
+            is_shared_lookup = self._is_shared_lookup_table(obj["name"])
+
             # For junctions, try to auto-detect parent from relationships
             if object_type == ObjectType.JUNCTION:
                 detected_parents = self._detect_junction_parents(obj)
@@ -309,13 +313,16 @@ class InteractiveClassifier:
                     click.echo(f"  Parent collection: {parent_collection} (auto-detected)")
 
             # For attributes or junctions without detected parents, ask user
-            if not parent_collection:
+            # Skip parent prompt for shared lookup tables (attributes referenced by multiple collections)
+            if not parent_collection and not is_shared_lookup:
                 parent_prompt = (
                     "Parent collection name (optional, press Enter to skip)"
                 )
                 parent_collection = click.prompt(parent_prompt, default="").strip()
                 if not parent_collection:
                     parent_collection = None
+            elif is_shared_lookup and object_type == ObjectType.ATTRIBUTE:
+                click.echo("  Shared lookup table - no parent collection")
 
         # Ask for unique columns for attributes and junctions (enables upsert behavior)
         unique_columns = None
@@ -336,6 +343,31 @@ class InteractiveClassifier:
             object_type=object_type,
             parent_collection=parent_collection
         )
+
+    def _is_shared_lookup_table(self, table_name: str) -> bool:
+        """
+        Check if a table is a shared lookup table (referenced by multiple junction tables).
+
+        A shared lookup table is one that is referenced via FK from 2+ different junction tables
+        (e.g., tags used by blog_tags, notes_tags, microblog_tags).
+
+        Args:
+            table_name: Name of the table to check
+
+        Returns:
+            True if table is referenced by FK from 2+ junction tables
+        """
+        junction_sources = set()
+
+        # Find all FK relationships pointing to this table
+        for rel in self.relationships:
+            if rel["target"] == table_name and rel["type"] == "foreign_key":
+                source_table = rel["source"]
+                # Check if source is a junction table (has junction-like name pattern)
+                if "_" in source_table:  # Junction tables typically have underscore (e.g., blog_tags)
+                    junction_sources.add(source_table)
+
+        return len(junction_sources) >= 2
 
     def _detect_junction_parents(self, junction_obj: Dict[str, Any]) -> List[str]:
         """
