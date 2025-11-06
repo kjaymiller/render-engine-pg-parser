@@ -74,6 +74,28 @@ cd docs/output && python -m http.server 8000
 # Visit http://localhost:8000
 ```
 
+### Release Workflow
+```bash
+# Standard release process:
+# 1. Create PR with changes (agent handles this)
+# 2. Review, verify tests and GitHub Actions pass
+# 3. Merge PR (ask user for confirmation before merging)
+# 4. Create prerelease with auto-generated notes
+
+# For step 1-3: Ask agent to create PR and wait for confirmation
+# For step 4: After merge confirmation, create release:
+gh release create <VERSION> --prerelease --generate-notes
+
+# Example: If last release is 2025.11.1b4, next is 2025.11.1b5
+gh release create 2025.11.1b5 --prerelease --generate-notes
+```
+
+**Release Workflow Notes:**
+- Always use `--prerelease` flag for beta versions (e.g., b1, b2, b3, etc.)
+- Use `--generate-notes` to auto-generate release notes from commits
+- Determine next version by incrementing the last release tag
+- **IMPORTANT**: Prompt user before merging any PR. Only merge after user confirms tests/actions are passing.
+
 ## Architecture
 
 ### Core Components
