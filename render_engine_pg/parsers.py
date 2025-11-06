@@ -10,21 +10,55 @@ from psycopg import sql
 
 
 class PGPageParser(BasePageParser):
-    """Parser for individual Page objects querying the database"""
+    """Parser for individual Page objects querying the database
+
+    Supports two modes of operation:
+    1. Explicit query via PostgresQuery(connection=db, query="SELECT ...")
+    2. Collection-based via PostgresQuery(connection=db, collection_name="blog")
+       where the query is loaded from pyproject.toml settings
+    """
 
     @staticmethod
     def parse_content_path(content_path: PostgresQuery) -> tuple:
         """
-        content_path is a PostgresQuery NamedTuple with:
-        - connection: Connection object
-        - query: SQL query string
+        Parse a single row or multiple rows from a database query.
+
+        Args:
+            content_path: PostgresQuery NamedTuple with:
+                - connection: psycopg Connection object
+                - query: Optional SQL query string (takes precedence)
+                - collection_name: Optional name to load query from settings
 
         Returns:
-        - Single result: attrs are the row columns as page attributes
-        - Multiple results: attrs include keys with lists, page.data has all rows
+            Tuple of (attrs dict, None):
+            - Single result: attrs are the row columns as page attributes
+            - Multiple results: attrs include keys with lists, page.data has all rows
+            - Empty result: returns ({}, None)
+
+        Raises:
+            ValueError: If neither query nor valid collection_name provided
         """
+        # Resolve query: explicit query takes precedence, fallback to settings
+        query = content_path.query
+        if not query and content_path.collection_name:
+            settings = PGSettings()
+            query = settings.get_read_sql(content_path.collection_name)
+
+        if not query:
+            collection_ref = (
+                f"for collection '{content_path.collection_name}'"
+                if content_path.collection_name
+                else ""
+            )
+            raise ValueError(
+                f"No query found {collection_ref}. "
+                "Provide explicit query via PostgresQuery(query=...) "
+                "or configure read_sql in pyproject.toml"
+            )
+
+        # Execute query
         with content_path.connection.cursor(row_factory=dict_row) as cur:
-            cur.execute(content_path.query)
+            cur.execute(query)
             rows = cur.fetchall()
 
         if not rows:

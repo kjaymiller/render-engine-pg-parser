@@ -197,6 +197,42 @@ class AllPosts(Collection):
 # page.data has all rows; page.id, page.title, etc. are lists
 ```
 
+### Queries from pyproject.toml (read_sql)
+Instead of hardcoding queries in Python, define them in `pyproject.toml`:
+```toml
+[tool.render-engine.pg]
+read_sql = {
+    blog = "SELECT id, title, slug FROM blog_posts WHERE published = true",
+    featured = "SELECT id, title FROM blog_posts WHERE featured = true ORDER BY date DESC LIMIT 5"
+}
+```
+
+Then load them via collection_name:
+```python
+from render_engine_pg import PostgresQuery, PGPageParser
+
+# Loads query from [tool.render-engine.pg].read_sql.blog
+query = PostgresQuery(
+    connection=db,
+    collection_name="blog"
+)
+page = Page(content_path=query, parser=PGPageParser)
+# page.id, page.title, page.slug available
+
+# Or in a collection with multiple rows
+@site.collection
+class FeaturedPosts(Collection):
+    content_path = PostgresQuery(connection=db, collection_name="featured")
+    parser = PGPageParser
+# page.data has all featured posts
+```
+
+**Benefits:**
+- Centralized query configuration
+- No duplication between TOML and Python code
+- Explicit query still supported: `PostgresQuery(connection=db, query="...")` takes precedence
+- Enables render-engine to generate these configs automatically via CLI
+
 ### Pre-Configured Inserts
 ```python
 # In pyproject.toml:
