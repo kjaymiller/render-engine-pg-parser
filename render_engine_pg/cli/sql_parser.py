@@ -35,37 +35,37 @@ class SQLParser:
         self.ignore_pk = ignore_pk
         self.ignore_timestamps = ignore_timestamps
 
-    # Pattern for page definitions
+    # Pattern for page definitions (handles schema-qualified names like public.table_name)
     # Syntax: -- @page [parent_name]
     PAGE_PATTERN = re.compile(
-        r"--\s*@page(?:\s+['\"]?(\w+)['\"]?)?\s*\n\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s*\((.*?)\);",
+        r"--\s*@page(?:\s+['\"]?(\w+)['\"]?)?\s*\n\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:\w+\.)?(\w+)\s*\((.*?)\);",
         re.IGNORECASE | re.DOTALL,
     )
 
     # Pattern for collection definitions (collection name and parent are optional)
     # Syntax: -- @collection [parent_name]
     COLLECTION_PATTERN = re.compile(
-        r"--\s*@collection(?:\s+['\"]?(\w+)['\"]?)?\s*\n\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s*\((.*?)\);",
+        r"--\s*@collection(?:\s+['\"]?(\w+)['\"]?)?\s*\n\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:\w+\.)?(\w+)\s*\((.*?)\);",
         re.IGNORECASE | re.DOTALL,
     )
 
     # Pattern for junction/relationship table definitions
     # Syntax: -- @junction [parent_name]
     JUNCTION_PATTERN = re.compile(
-        r"--\s*@junction(?:\s+['\"]?(\w+)['\"]?)?\s*\n\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s*\((.*?)\);",
+        r"--\s*@junction(?:\s+['\"]?(\w+)['\"]?)?\s*\n\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:\w+\.)?(\w+)\s*\((.*?)\);",
         re.IGNORECASE | re.DOTALL,
     )
 
     # Pattern for attribute table definitions
     # Syntax: -- @attribute [parent_name]
     ATTRIBUTE_PATTERN = re.compile(
-        r"--\s*@attribute(?:\s+['\"]?(\w+)['\"]?)?\s*\n\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s*\((.*?)\);",
+        r"--\s*@attribute(?:\s+['\"]?(\w+)['\"]?)?\s*\n\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:\w+\.)?(\w+)\s*\((.*?)\);",
         re.IGNORECASE | re.DOTALL,
     )
 
-    # Pattern for all CREATE TABLE statements
+    # Pattern for all CREATE TABLE statements (handles schema-qualified names like public.table_name)
     ALL_TABLES_PATTERN = re.compile(
-        r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s*\((.*?)\);",
+        r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:\w+\.)?(\w+)\s*\((.*?)\);",
         re.IGNORECASE | re.DOTALL,
     )
 
