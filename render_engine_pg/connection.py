@@ -32,7 +32,16 @@ def get_db_connection(
 
 
 class PostgresQuery(NamedTuple):
-    """Configuration for querying PostgreSQL"""
+    """Configuration for querying PostgreSQL
+
+    Can be used in two ways:
+    1. With explicit query: PostgresQuery(connection=db, query="SELECT ...")
+    2. With collection_name: PostgresQuery(connection=db, collection_name="blog")
+       - The query will be loaded from pyproject.toml [tool.render-engine.pg].read_sql
+
+    Explicit query takes precedence if both are provided.
+    """
 
     connection: Connection
-    query: str
+    query: Optional[str] = None
+    collection_name: Optional[str] = None
