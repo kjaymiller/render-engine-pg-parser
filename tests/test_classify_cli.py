@@ -166,9 +166,9 @@ class TestClassifyCLIComplexScenarios:
         runner = CliRunner()
         with runner.isolated_filesystem():
             Path("blog.sql").write_text(sql_content)
-            # Classify: blog=c, tags=a (with parent and unique cols), blog_tags=j (with parent and unique cols)
+            # Classify: blog=c (auto-classifies blog_tags as junction), tags=a (parent, unique cols)
             result = runner.invoke(
-                main, ["blog.sql", "-v"], input="c\na\n\n\nj\n\n\n"
+                main, ["blog.sql", "-v"], input="c\na\n\n\n"
             )
             assert result.exit_code == 0
             assert "[tool.render-engine.pg.insert_sql]" in result.output
@@ -427,9 +427,9 @@ class TestClassifyCLIIntegrationEndToEnd:
         runner = CliRunner()
         with runner.isolated_filesystem():
             Path("schema.sql").write_text(sql_content)
-            # Simulate: blog=c, notes=c, tags=a, blog_tags=j, notes_tags=j
+            # Simulate: blog=c (auto-classifies blog_tags), notes=c (auto-classifies notes_tags), tags=a (parent, unique cols)
             result = runner.invoke(
-                main, ["schema.sql", "-v"], input="c\n\nc\n\na\n\nj\n\nj\n\n"
+                main, ["schema.sql", "-v"], input="c\nc\na\n\n\n"
             )
             assert result.exit_code == 0
             assert "[tool.render-engine.pg" in result.output

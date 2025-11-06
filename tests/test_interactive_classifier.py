@@ -506,15 +506,17 @@ class TestIntegrationWithSchema:
         ]
 
         classifier = InteractiveClassifier()
-        # Simulate: blog=c (no parent), notes=c (no parent), tags=a (parent, unique cols), blog_tags=j (parent, unique cols)
-        with patch("click.prompt", side_effect=["c", "c", "a", "", "", "j", "", ""]):
+        # Simulate: blog=c (no parent), notes=c (no parent), tags=a (parent, unique cols)
+        # blog_tags auto-classifies as junction when blog is classified as collection
+        with patch("click.prompt", side_effect=["c", "c", "a", "", ""]):
             result_objects, classified_count = classifier.classify_tables(objects)
 
-        assert classified_count == 4
+        assert classified_count == 4  # blog, notes, tags, and auto-classified blog_tags
         assert result_objects[0]["type"] == ObjectType.COLLECTION.value
         assert result_objects[1]["type"] == ObjectType.COLLECTION.value
         assert result_objects[2]["type"] == ObjectType.ATTRIBUTE.value
         assert result_objects[3]["type"] == ObjectType.JUNCTION.value
+        assert result_objects[3]["attributes"]["parent_collection"] == "blog"
 
 
 class TestClassificationDataclass:

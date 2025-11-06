@@ -65,6 +65,10 @@ class InteractiveClassifier:
 
         # Interactive classification loop
         for obj in tables_to_classify:
+            # Skip if already classified (might have been auto-classified as junction)
+            if obj["type"] != "unmarked":
+                continue
+
             suggested_type = self._display_table_info(obj)
             classification = self._prompt_classification(obj, suggested_type)
 
@@ -88,6 +92,19 @@ class InteractiveClassifier:
             if classification.parent_collection:
                 click.echo(f"    Parent: {classification.parent_collection}")
             click.echo()
+
+            # Auto-classify junctions for this collection
+            if classification.object_type == ObjectType.COLLECTION:
+                related_junctions = self._find_junctions_for_collection(obj["name"], objects)
+                for junction_obj in related_junctions:
+                    # Auto-classify junction with this collection as parent
+                    junction_obj["type"] = ObjectType.JUNCTION.value
+                    junction_obj["attributes"]["parent_collection"] = obj["name"]
+                    classified_count += 1
+
+                    click.echo(f"  ✓ Auto-classified '{junction_obj['name']}' as 'junction'")
+                    click.echo(f"    Parent: {obj['name']}")
+                    click.echo()
 
         return objects, classified_count
 
@@ -146,6 +163,37 @@ class InteractiveClassifier:
             elif rel["target"] == table_name:
                 related.add(rel["source"])
         return sorted(list(related))
+
+    def _find_junctions_for_collection(self, collection_name: str, all_objects: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Find all junction tables that connect to a given collection.
+
+        Args:
+            collection_name: Name of the collection to find junctions for
+            all_objects: List of all table objects
+
+        Returns:
+            List of junction table objects that relate to this collection
+        """
+        junctions = []
+
+        for obj in all_objects:
+            # Skip if already classified
+            if obj["type"] != "unmarked":
+                continue
+
+            # Check if this could be a junction table
+            columns = obj["columns"]
+            fk_count = sum(1 for col in columns if col.endswith("_id"))
+
+            # Junction tables typically have 2+ FK columns and few total columns
+            if fk_count >= 2 and len(columns) <= 4:
+                # Check if it connects to this collection
+                related = self._get_related_tables(obj["name"])
+                if collection_name in related:
+                    junctions.append(obj)
+
+        return junctions
 
     def _suggest_classification(self, obj: Dict[str, Any]) -> tuple:
         """
