@@ -143,6 +143,8 @@ class InteractiveClassifier:
         if hint_text:
             click.echo(click.style(f"  Hint: {hint_text}", fg="green"))
             return suggested_type
+        else:
+            click.echo(click.style("  (No hint available - classify manually)", fg="bright_red"))
 
         return None
 
