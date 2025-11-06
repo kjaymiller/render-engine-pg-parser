@@ -65,8 +65,8 @@ class InteractiveClassifier:
 
         # Interactive classification loop
         for obj in tables_to_classify:
-            self._display_table_info(obj)
-            classification = self._prompt_classification(obj)
+            suggested_type = self._display_table_info(obj)
+            classification = self._prompt_classification(obj, suggested_type)
 
             if classification is None:
                 click.echo("  → Skipped\n")
@@ -91,12 +91,15 @@ class InteractiveClassifier:
 
         return objects, classified_count
 
-    def _display_table_info(self, obj: Dict[str, Any]) -> None:
+    def _display_table_info(self, obj: Dict[str, Any]) -> Optional[ObjectType]:
         """
         Display table information to help user classify it.
 
         Args:
             obj: Table object to display
+
+        Returns:
+            Suggested ObjectType if a strong hint exists, None otherwise
         """
         table_name = obj["name"]
         columns = obj["columns"]
@@ -119,9 +122,12 @@ class InteractiveClassifier:
             click.echo(f"  Related Tables: {', '.join(related)}")
 
         # Provide classification hints
-        hints = self._suggest_classification(obj)
-        if hints:
-            click.echo(f"  Hint: {hints}")
+        suggested_type, hint_text = self._suggest_classification(obj)
+        if hint_text:
+            click.echo(click.style(f"  Hint: {hint_text}", fg="green"))
+            return suggested_type
+
+        return None
 
     def _get_related_tables(self, table_name: str) -> List[str]:
         """
@@ -141,7 +147,7 @@ class InteractiveClassifier:
                 related.add(rel["source"])
         return sorted(list(related))
 
-    def _suggest_classification(self, obj: Dict[str, Any]) -> Optional[str]:
+    def _suggest_classification(self, obj: Dict[str, Any]) -> tuple:
         """
         Suggest a classification based on table structure.
 
@@ -149,7 +155,7 @@ class InteractiveClassifier:
             obj: Table object to analyze
 
         Returns:
-            Suggestion string or None
+            Tuple of (suggestion_type: ObjectType or None, suggestion_text: str or None)
         """
         table_name = obj["name"]
         columns = obj["columns"]
@@ -163,7 +169,7 @@ class InteractiveClassifier:
         # - Few columns overall
         fk_count = sum(1 for col in columns if col.endswith("_id"))
         if len(related) >= 2 and fk_count >= 2 and len(columns) <= 4:
-            return "This looks like a junction table (many-to-many relationship)"
+            return ObjectType.JUNCTION, "This looks like a junction table (many-to-many relationship)"
 
         # Attribute table heuristics:
         # - Single primary key, few other columns
@@ -174,7 +180,7 @@ class InteractiveClassifier:
                 lookup in table_name.lower()
                 for lookup in ["tag", "categor", "status", "type", "role"]
             ):
-                return "This looks like an attribute/lookup table"
+                return ObjectType.ATTRIBUTE, "This looks like an attribute/lookup table"
 
         # Collection/Page heuristics:
         # - Multiple content columns (title, content, description, etc.)
@@ -183,16 +189,17 @@ class InteractiveClassifier:
             c for c in columns if any(ind in c.lower() for ind in content_indicators)
         ]
         if len(content_cols) >= 2:
-            return "This looks like a content table (collection or page)"
+            return ObjectType.COLLECTION, "This looks like a content table (collection or page)"
 
-        return None
+        return None, None
 
-    def _prompt_classification(self, obj: Dict[str, Any]) -> Optional[Classification]:
+    def _prompt_classification(self, obj: Dict[str, Any], suggested_type: Optional[ObjectType] = None) -> Optional[Classification]:
         """
         Prompt user to classify a single table.
 
         Args:
             obj: Table object to classify
+            suggested_type: ObjectType from hint analysis, if available
 
         Returns:
             Classification object or None if skipped
@@ -203,7 +210,22 @@ class InteractiveClassifier:
                 "Classify as: "
                 "[p]age / [c]ollection / [a]ttribute / [j]unction / [s]kip?"
             )
-            choice = click.prompt(prompt_text, default="s").lower().strip()
+
+            # If we have a hint, suggest pressing Enter to use it
+            if suggested_type:
+                hint_shortcut = next(
+                    (k for k, v in self.SHORTCUT_TO_TYPE.items() if v == suggested_type),
+                    None
+                )
+                if hint_shortcut:
+                    prompt_text += f" (or press Enter for hint: {hint_shortcut})"
+                    default_choice = hint_shortcut
+                else:
+                    default_choice = "s"
+            else:
+                default_choice = "s"
+
+            choice = click.prompt(prompt_text, default=default_choice).lower().strip()
 
             # Handle shortcuts and full type names
             object_type = None
@@ -223,16 +245,87 @@ class InteractiveClassifier:
         if object_type is None:
             return None
 
-        # Ask for parent collection if applicable
+        # Ask for parent collection if applicable (attributes and junctions only)
+        # Pages are standalone and don't have parent collections
         parent_collection = None
-        if object_type in (ObjectType.PAGE, ObjectType.ATTRIBUTE, ObjectType.JUNCTION):
-            parent_prompt = (
-                "Parent collection name (optional, press Enter to skip)"
-            )
-            parent_collection = click.prompt(parent_prompt, default="").strip()
+        if object_type in (ObjectType.ATTRIBUTE, ObjectType.JUNCTION):
+            # For junctions, try to auto-detect parent from relationships
+            if object_type == ObjectType.JUNCTION:
+                detected_parents = self._detect_junction_parents(obj)
+                if detected_parents:
+                    # Show detected relationships
+                    parent_str = " ← → ".join(detected_parents)
+                    click.echo(f"  Detected: Junction connects {parent_str}")
+                    # Use first table as parent (typically the collection)
+                    parent_collection = detected_parents[0]
+                    click.echo(f"  Parent collection: {parent_collection} (auto-detected)")
+
+            # For attributes or junctions without detected parents, ask user
             if not parent_collection:
-                parent_collection = None
+                parent_prompt = (
+                    "Parent collection name (optional, press Enter to skip)"
+                )
+                parent_collection = click.prompt(parent_prompt, default="").strip()
+                if not parent_collection:
+                    parent_collection = None
+
+        # Ask for unique columns for attributes and junctions (enables upsert behavior)
+        unique_columns = None
+        if object_type in (ObjectType.ATTRIBUTE, ObjectType.JUNCTION):
+            click.echo(f"  Unique columns enable upsert (insert or update) behavior.")
+            unique_cols_input = click.prompt(
+                "  Enter unique column names (comma-separated, or press Enter to skip)",
+                default=""
+            ).strip()
+            if unique_cols_input:
+                unique_columns = [col.strip() for col in unique_cols_input.split(",") if col.strip()]
+
+        # Store unique columns in attributes for query generator
+        if unique_columns:
+            obj["attributes"]["unique_columns"] = unique_columns
 
         return Classification(
-            object_type=object_type, parent_collection=parent_collection
+            object_type=object_type,
+            parent_collection=parent_collection
         )
+
+    def _detect_junction_parents(self, junction_obj: Dict[str, Any]) -> List[str]:
+        """
+        Detect parent tables for a junction table by analyzing foreign key columns.
+
+        For a junction table like blog_tags(blog_id, tag_id), this identifies
+        that it connects 'blog' and 'tags'.
+
+        Args:
+            junction_obj: The junction table object
+
+        Returns:
+            List of parent table/object names (typically 2 for M2M junctions)
+        """
+        parents = []
+
+        # Build table name to object name mapping
+        table_to_name = {}
+        for rel in self.relationships:
+            # Look for relationships that reference this junction
+            if "junction_table" in rel.get("metadata", {}) and rel["metadata"]["junction_table"] == junction_obj["name"]:
+                # Extract the parent tables from the relationship
+                if rel["source"] not in parents:
+                    parents.append(rel["source"])
+                if rel["target"] not in parents and len(parents) < 2:
+                    parents.append(rel["target"])
+
+        # If no relationships found, try to infer from FK column patterns
+        if not parents:
+            for column in junction_obj["columns"]:
+                # Look for _id suffix and infer table name
+                if column.endswith("_id"):
+                    # Remove _id suffix and singularize if needed
+                    table_hint = column[:-3]  # Remove _id
+                    # Find matching object
+                    for rel in self.relationships:
+                        if rel.get("column") == column:
+                            parents.append(rel.get("target"))
+                            break
+
+        return parents[:2]  # Return up to 2 parents for M2M

@@ -75,8 +75,8 @@ class TestClassifyTables:
         ]
 
         classifier = InteractiveClassifier()
-        # Simulate user input: 'c' for blog, 'a' for tags
-        with patch("click.prompt", side_effect=["c", "", "a", ""]):
+        # Simulate user input: 'c' for blog, 'a' for tags (parent collection), '' for unique cols
+        with patch("click.prompt", side_effect=["c", "a", "", ""]):
             result_objects, classified_count = classifier.classify_tables(objects)
 
         assert classified_count == 2
@@ -235,7 +235,7 @@ class TestPromptClassification:
         }
 
         classifier = InteractiveClassifier()
-        with patch("click.prompt", side_effect=["a", ""]):
+        with patch("click.prompt", side_effect=["a", "", ""]):
             classification = classifier._prompt_classification(obj)
 
         assert classification.object_type == ObjectType.ATTRIBUTE
@@ -252,7 +252,7 @@ class TestPromptClassification:
         }
 
         classifier = InteractiveClassifier()
-        with patch("click.prompt", side_effect=["j", ""]):
+        with patch("click.prompt", side_effect=["j", "", ""]):
             classification = classifier._prompt_classification(obj)
 
         assert classification.object_type == ObjectType.JUNCTION
@@ -269,7 +269,8 @@ class TestPromptClassification:
         }
 
         classifier = InteractiveClassifier()
-        with patch("click.prompt", side_effect=["page", ""]):
+        # Pages don't ask for parent collection, just the type
+        with patch("click.prompt", side_effect=["page"]):
             classification = classifier._prompt_classification(obj)
 
         assert classification.object_type == ObjectType.PAGE
@@ -296,37 +297,39 @@ class TestPromptClassification:
             assert "Invalid choice" in calls_str
 
     def test_prompt_with_parent_collection(self):
-        """Test prompting for parent collection."""
+        """Test prompting for parent collection with attributes."""
         obj = {
-            "name": "posts",
+            "name": "tags",
             "type": "unmarked",
-            "table": "posts",
-            "columns": ["id", "title"],
+            "table": "tags",
+            "columns": ["id", "name"],
             "attributes": {},
         }
 
         classifier = InteractiveClassifier()
-        with patch("click.prompt", side_effect=["p", "blog"]):
+        # Attribute: 'a' for type, 'blog' for parent collection, '' for unique columns
+        with patch("click.prompt", side_effect=["a", "blog", ""]):
             classification = classifier._prompt_classification(obj)
 
-        assert classification.object_type == ObjectType.PAGE
+        assert classification.object_type == ObjectType.ATTRIBUTE
         assert classification.parent_collection == "blog"
 
     def test_prompt_parent_optional(self):
-        """Test that parent collection is optional."""
+        """Test that parent collection is optional for attributes."""
         obj = {
-            "name": "posts",
+            "name": "tags",
             "type": "unmarked",
-            "table": "posts",
-            "columns": ["id", "title"],
+            "table": "tags",
+            "columns": ["id", "name"],
             "attributes": {},
         }
 
         classifier = InteractiveClassifier()
-        with patch("click.prompt", side_effect=["p", ""]):
+        # Attribute: 'a' for type, '' for parent collection (skip), '' for unique columns
+        with patch("click.prompt", side_effect=["a", "", ""]):
             classification = classifier._prompt_classification(obj)
 
-        assert classification.object_type == ObjectType.PAGE
+        assert classification.object_type == ObjectType.ATTRIBUTE
         assert classification.parent_collection is None
 
     def test_prompt_skip_returns_none(self):
@@ -377,10 +380,11 @@ class TestSuggestClassification:
 
         classifier = InteractiveClassifier()
         classifier.relationships = classifier.analyzer.analyze(objects)
-        suggestion = classifier._suggest_classification(objects[2])
+        suggested_type, suggestion = classifier._suggest_classification(objects[2])
 
         assert suggestion is not None
         assert "junction" in suggestion.lower()
+        assert suggested_type is not None
 
     def test_suggest_attribute_table(self):
         """Test that attribute tables are recognized."""
@@ -393,10 +397,11 @@ class TestSuggestClassification:
         }
 
         classifier = InteractiveClassifier()
-        suggestion = classifier._suggest_classification(obj)
+        suggested_type, suggestion = classifier._suggest_classification(obj)
 
         assert suggestion is not None
         assert "attribute" in suggestion.lower() or "lookup" in suggestion.lower()
+        assert suggested_type is not None
 
     def test_suggest_content_table(self):
         """Test that content tables are recognized."""
@@ -409,10 +414,11 @@ class TestSuggestClassification:
         }
 
         classifier = InteractiveClassifier()
-        suggestion = classifier._suggest_classification(obj)
+        suggested_type, suggestion = classifier._suggest_classification(obj)
 
         assert suggestion is not None
         assert "content" in suggestion.lower()
+        assert suggested_type is not None
 
 
 class TestGetRelatedTables:
@@ -500,8 +506,8 @@ class TestIntegrationWithSchema:
         ]
 
         classifier = InteractiveClassifier()
-        # Simulate: blog=c, "", notes=c, "", tags=a, "", blog_tags=j, ""
-        with patch("click.prompt", side_effect=["c", "", "c", "", "a", "", "j", ""]):
+        # Simulate: blog=c (no parent), notes=c (no parent), tags=a (parent, unique cols), blog_tags=j (parent, unique cols)
+        with patch("click.prompt", side_effect=["c", "c", "a", "", "", "j", "", ""]):
             result_objects, classified_count = classifier.classify_tables(objects)
 
         assert classified_count == 4

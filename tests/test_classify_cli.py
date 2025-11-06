@@ -69,8 +69,8 @@ class TestClassifyCLIOutputFile:
         runner = CliRunner()
         with runner.isolated_filesystem():
             Path("test.sql").write_text(sql_content)
-            # Classify as collection
-            result = runner.invoke(main, ["test.sql", "-o", "output.toml"], input="c\n\n")
+            # Classify as collection (no parent collection prompt for collections)
+            result = runner.invoke(main, ["test.sql", "-o", "output.toml"], input="c\n")
             assert result.exit_code == 0
             assert Path("output.toml").exists()
             output_content = Path("output.toml").read_text()
@@ -88,7 +88,7 @@ class TestClassifyCLIOutputFile:
         with runner.isolated_filesystem():
             Path("test.sql").write_text(sql_content)
             result = runner.invoke(
-                main, ["test.sql", "-o", "output/dir/file.toml"], input="c\n\n"
+                main, ["test.sql", "-o", "output/dir/file.toml"], input="c\n"
             )
             assert result.exit_code == 0
             assert Path("output/dir/file.toml").exists()
@@ -104,7 +104,7 @@ class TestClassifyCLIOutputFile:
         with runner.isolated_filesystem():
             Path("test.sql").write_text(sql_content)
             result = runner.invoke(
-                main, ["test.sql", "--output", "out.toml"], input="c\n\n"
+                main, ["test.sql", "--output", "out.toml"], input="c\n"
             )
             assert result.exit_code == 0
             assert Path("out.toml").exists()
@@ -123,7 +123,7 @@ class TestClassifyCLIVerboseFlag:
         runner = CliRunner()
         with runner.isolated_filesystem():
             Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql", "-v"], input="c\n\n")
+            result = runner.invoke(main, ["test.sql", "-v"], input="c\n")
             assert "Parsing" in result.output or "Found" in result.output
 
     def test_verbose_long_form_flag(self):
@@ -136,7 +136,7 @@ class TestClassifyCLIVerboseFlag:
         runner = CliRunner()
         with runner.isolated_filesystem():
             Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql", "--verbose"], input="c\n\n")
+            result = runner.invoke(main, ["test.sql", "--verbose"], input="c\n")
             assert result.exit_code == 0
 
 
@@ -166,9 +166,9 @@ class TestClassifyCLIComplexScenarios:
         runner = CliRunner()
         with runner.isolated_filesystem():
             Path("blog.sql").write_text(sql_content)
-            # Classify: blog=c, tags=a, blog_tags=j
+            # Classify: blog=c, tags=a (with parent and unique cols), blog_tags=j (with parent and unique cols)
             result = runner.invoke(
-                main, ["blog.sql", "-v"], input="c\n\na\n\nj\n\n"
+                main, ["blog.sql", "-v"], input="c\na\n\n\nj\n\n\n"
             )
             assert result.exit_code == 0
             assert "[tool.render-engine.pg.insert_sql]" in result.output
@@ -201,7 +201,7 @@ class TestClassifyCLIComplexScenarios:
                     "-v",
                     "--ignore-pk",
                 ],
-                input="c\n\np\nusers\n",
+                input="c\np\n",
             )
             assert result.exit_code == 0
             assert Path("output.toml").exists()
