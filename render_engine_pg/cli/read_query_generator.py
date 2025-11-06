@@ -153,10 +153,28 @@ class ReadQueryGenerator:
             query_parts[0] = select_distinct
 
         # Add WHERE clause based on object type
-        # Pages: Single item lookup by ID
+        # Pages: Single item lookup by ID (only if referenced by FK), otherwise all items
         # Collections/Attributes: All items (no WHERE clause)
         if obj_type == "page":
-            query_parts.append(f"WHERE {table}.id = {{id}};")
+            # Check if this page is referenced by any foreign keys
+            # If not, it's a standalone data source (like conferences) and should return all rows
+            has_incoming_fk = any(
+                rel["target"] == obj_name and rel["type"] == "foreign_key"
+                for rel in relationships
+            )
+            if has_incoming_fk:
+                # Page is referenced by FK, so it needs parameterized query
+                query_parts.append(f"WHERE {table}.id = {{id}};")
+            else:
+                # Standalone page - return all rows
+                if agg_cols or many_to_many:
+                    group_by_clause = f"GROUP BY {', '.join([f'{table}.{col}' for col in obj['columns']])}"
+                    query_parts.append(group_by_clause)
+                # Add ORDER BY
+                if "date" in obj["columns"]:
+                    query_parts.append(f"ORDER BY {table}.date DESC;")
+                else:
+                    query_parts.append(";")
         else:
             # Collections and attributes - fetch all items
             # If we have aggregate columns, we need GROUP BY
