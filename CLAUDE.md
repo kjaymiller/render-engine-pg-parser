@@ -95,6 +95,22 @@ gh release create 2025.11.1b5 --prerelease --generate-notes
 - Use `--generate-notes` to auto-generate release notes from commits
 - Determine next version by incrementing the last release tag
 - **IMPORTANT**: Prompt user before merging any PR. Only merge after user confirms tests/actions are passing.
+- **Publish requires tests to pass** - Do not release without successful test/typecheck runs
+
+### Development Workflow
+
+Before committing any changes, run:
+```bash
+just check
+```
+
+This runs both type checking and tests, ensuring code quality before commits.
+
+Available recipes:
+- `just check` - Run typecheck and tests together
+- `just typecheck` - Run mypy type checking only
+- `just test` - Run pytest only
+- `just prerelease <version>` - Create a release (after merge confirmation)
 
 ## Architecture
 
