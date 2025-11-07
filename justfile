@@ -1,6 +1,6 @@
 check:
     uv tool run mypy render_engine_pg
-    uv tool run pytest
+    uv run pytest --extra test
 
 test:
     uv run pytest
