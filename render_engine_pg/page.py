@@ -1,4 +1,7 @@
+from pathlib import Path
+
 from render_engine.page import Page
+from render_engine.theme import ThemeManager
 
 
 class PGPage(Page):
