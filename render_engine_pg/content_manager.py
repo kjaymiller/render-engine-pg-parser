@@ -1,3 +1,4 @@
+from pathlib import Path
 from psycopg.rows import class_row
 from render_engine.content_managers import ContentManager
 from typing import Generator, Iterable, Optional
@@ -75,23 +76,67 @@ class PostgresContentManager(ContentManager):
 
     def create_entry(
         self,
-        filepath: Path = None,
-        editor: str = None,
-        metadata: dict = None,
-        content: str = None,
-    ):
-        """Create a new entry"""
+        filepath: Optional[Path] = None,
+        editor: Optional[str] = None,
+        metadata: Optional[dict] = None,
+        content: Optional[str] = None,
+        table: Optional[str] = None,
+        **kwargs,
+    ) -> str:
+        """
+        Create a new database entry.
 
-        if not filepath:
-            raise ValueError("filepath needs to be specified.")
+        For PostgreSQL-based collections, this inserts content directly into the database
+        rather than writing to a file. The method uses the collection's parser to handle
+        pre-configured INSERT statements and main content insertion.
 
-        parsed_content = self.collection.Parser.create_entry(
-            content=content, **metadata
+        Args:
+            filepath: Not used for PostgreSQL collections (kept for API compatibility)
+            editor: Not used for PostgreSQL collections (kept for API compatibility)
+            metadata: Dictionary of metadata/frontmatter attributes to include
+            content: Markdown content to insert
+            table: Database table name (defaults to collection name if not provided)
+            **kwargs: Additional arguments passed to parser's create_entry
+
+        Returns:
+            Success message with the SQL query that was executed
+
+        Example:
+            content_manager.create_entry(
+                content="---\\ntitle: My Post\\n---\\n# Hello World",
+                metadata={"author": "John"},
+                table="posts"
+            )
+        """
+        # Prepare metadata dict
+        if metadata is None:
+            metadata = {}
+
+        # Get connection from postgres_query
+        connection = self.postgres_query.connection
+
+        # Determine collection_name (use from postgres_query or collection class name)
+        collection_name = (
+            self.postgres_query.collection_name
+            or getattr(self.collection, "collection_name", None)
+            or self.collection.__class__.__name__.lower()
         )
-        filepath.write_text(parsed_content)
-        if editor:
-            subprocess.run([editor, filepath])
-        return f"New entry created at {filepath} ."
+
+        # Determine table name (use provided table or collection_name)
+        if table is None:
+            table = collection_name
+
+        # Call parser's create_entry to handle database insertion
+        result = self.collection.Parser.create_entry(
+            content=content or "",
+            connection=connection,
+            table=table,
+            collection_name=collection_name,
+            **metadata,
+            **kwargs,
+        )
+
+        return f"New entry created in table '{table}': {result}"
 
     def __iter__(self):
         yield from self.pages
