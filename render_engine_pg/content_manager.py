@@ -80,7 +80,7 @@ class PostgresContentManager(ContentManager):
         self,
         filepath: Optional[Path] = None,
         editor: Optional[str] = None,
-        metadata: Optional[dict] = None,
+        metadata: Optional[dict[str, Any]] = None,
         content: Optional[str] = None,
     ) -> str:
         """Create a new entry"""
