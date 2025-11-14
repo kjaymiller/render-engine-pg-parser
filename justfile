@@ -1,12 +1,11 @@
 check:
-    uv tool run mypy render_engine_pg
-    uv run pytest
+    uv tool run nox -s check
 
 test:
-    uv run pytest
+    uv tool run nox -s test
 
 typecheck:
-    uv tool run mypy render_engine_pg
+    uv tool run nox -s typecheck
 
 prerelease version:
     gh release create {{version}} --prerelease --generate-notes

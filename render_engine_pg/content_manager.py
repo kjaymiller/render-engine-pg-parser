@@ -58,12 +58,13 @@ class PostgresContentManager(ContentManager):
         with self.postgres_query.connection.cursor(
             row_factory=class_row(PGPage)
         ) as cur:
-            cur.execute(self.postgres_query.query)
+            if self.postgres_query.query is not None:
+                cur.execute(self.postgres_query.query)
             for row in cur:
                 row.parser_extras = getattr(self.collection, "parser_extras", {})
                 row.routes = self.collection.routes
                 row.template = getattr(self.collection, "template", None)
-                row.collection = self.collection.to_dict()
+                setattr(row, "collection", self.collection.to_dict())
                 yield row
 
     @property
