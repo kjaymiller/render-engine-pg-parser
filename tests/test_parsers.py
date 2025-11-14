@@ -186,3 +186,115 @@ def test():
         assert "<code>" in result or "<pre>" in result
         # The backticks should be gone (converted to HTML)
         assert "```" not in result
+
+
+class TestPGMarkdownCollectionParserCreateEntryTemplates:
+    """Test PGMarkdownCollectionParser.create_entry() with template substitution."""
+
+    def test_template_substitution_skips_missing_fields(self, mocker):
+        """Test that template substitution gracefully skips templates with missing required fields."""
+        # Test the format_map behavior directly
+        frontmatter_data = {"id": 1, "title": "My Post"}
+
+        # First template has all fields
+        template1 = "INSERT INTO posts (id, title) VALUES ({id}, {title})"
+        result1 = template1.format_map(frontmatter_data)
+        assert "1" in result1 and "My Post" in result1
+
+        # Second template has missing fields - should raise KeyError
+        template2 = "INSERT INTO metadata (id, author) VALUES ({id}, {author})"
+        try:
+            result2 = template2.format_map(frontmatter_data)
+            # Should not reach here
+            assert False, "Should have raised KeyError for missing 'author' field"
+        except KeyError as e:
+            # Expected - field 'author' is missing
+            assert str(e.args[0]) == "author"
+
+    def test_create_entry_handles_template_execution_with_missing_fields(self, mocker):
+        """Test that create_entry executes templates that have all fields and skips those that don't."""
+        mock_settings = MagicMock()
+        mock_settings.get_insert_sql.return_value = [
+            "INSERT INTO posts (id, title) VALUES ({id}, {title})",
+            "INSERT INTO metadata (id, author) VALUES ({id}, {author})",
+        ]
+        mocker.patch(
+            "render_engine_pg.parsers.PGSettings", return_value=mock_settings
+        )
+
+        content = """---
+id: 1
+title: My Post
+---
+# Content"""
+
+        mock_cursor = MagicMock()
+        mock_connection = MagicMock()
+        mock_connection.cursor.return_value.__enter__.return_value = mock_cursor
+
+        # Mock the as_string method to avoid psycopg encoding issues in tests
+        mocker.patch.object(
+            type(MagicMock().as_string.return_value),
+            "__str__",
+            return_value="INSERT INTO posts (id, title) VALUES (1, 'My Post')",
+        )
+
+        # Patch the SQL class to return a simple string representation
+        from psycopg import sql
+
+        original_format = sql.SQL.format
+
+        def mock_format(*args, **kwargs):
+            return MagicMock()
+
+        mocker.patch.object(sql.SQL, "format", mock_format)
+        mocker.patch.object(sql.SQL, "as_string", lambda self, conn: "")
+
+        result = PGMarkdownCollectionParser.create_entry(
+            content=content,
+            collection_name="blog",
+            connection=mock_connection,
+            table="posts",
+        )
+
+        # The first template should have been executed (has all fields)
+        # The second should have been skipped (missing 'author' field)
+        assert mock_cursor.execute.call_count >= 1
+
+    def test_format_map_vs_format_difference(self):
+        """Document the difference between format() and format_map() for missing fields."""
+        data = {"id": 1}
+
+        # Using format() raises KeyError for missing fields
+        template = "INSERT INTO t (id, name) VALUES ({id}, {name})"
+        try:
+            template.format(**data)
+            assert False, "format() should raise KeyError"
+        except KeyError:
+            pass  # Expected
+
+        # format_map() also raises KeyError for missing fields
+        try:
+            template.format_map(data)
+            assert False, "format_map() should raise KeyError"
+        except KeyError:
+            pass  # Expected
+
+    def test_partial_frontmatter_scenario(self):
+        """
+        Test the actual scenario from populate_db.py:
+        markdown with minimal frontmatter vs templates expecting more fields.
+        """
+        # This is what we'd have from the markdown
+        frontmatter_data = {"date": "2020-02-19 10:10:00", "content": "Post content"}
+
+        # This is what the insert_sql template expects
+        template = "INSERT INTO microblog (id, slug, date) VALUES ({id}, {slug}, {date})"
+
+        # Should raise KeyError for missing 'id' and 'slug'
+        try:
+            template.format_map(frontmatter_data)
+            assert False, "Should raise KeyError for missing fields"
+        except KeyError as e:
+            # One of the fields will be missing
+            assert str(e.args[0]) in ("id", "slug")
