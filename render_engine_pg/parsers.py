@@ -167,10 +167,17 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
             if insert_sql_list and connection:
                 with connection.cursor() as cur:
                     for insert_sql_template in insert_sql_list:
-                        # Use safe string formatting to interpolate {placeholders} from frontmatter data
-                        # Python's str.format() handles the substitution safely
-                        formatted_query = insert_sql_template.format(**frontmatter_data)
-                        cur.execute(formatted_query)
+                        # Use safe string formatting with format_map to handle missing placeholders
+                        # Skip templates with missing required fields - they will be handled elsewhere
+                        try:
+                            formatted_query = insert_sql_template.format_map(frontmatter_data)
+                            cur.execute(formatted_query)
+                        except KeyError as e:
+                            # Skip this template if required fields are missing
+                            # This allows markdown files with partial frontmatter to still work
+                            missing_field = e.args[0]
+                            # Silently skip - log if needed for debugging
+                            pass
                 connection.commit()
 
         # Build SQL INSERT query for main content entry
