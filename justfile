@@ -1,3 +1,6 @@
+_default:
+  just --list
+
 check:
     uv tool run nox -s check
 
