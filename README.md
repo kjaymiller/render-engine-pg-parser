@@ -245,7 +245,22 @@ Generated static pages
 
 ## Testing
 
-Run the test suite:
+### Using Just (Recommended)
+
+Quick commands for testing and type checking:
+
+```bash
+# Run tests
+just test
+
+# Run type checking
+just typecheck
+
+# Run both tests and type checking
+just check
+```
+
+### Using Pytest Directly
 
 ```bash
 # Run all tests
@@ -453,20 +468,40 @@ Contributions are welcome! Please:
 git clone https://github.com/your-username/render-engine-pg-parser.git
 cd render-engine-pg-parser
 
-# Create virtual environment
+# Install with uv (recommended)
+uv sync
+
+# Or create virtual environment with pip
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -e ".[test]"
 
-# Install in development mode
-pip install -e ".[dev]"
+# Run tests and type checking
+just check
 
-# Run tests
-pytest
+# Or run individually
+just test
+just typecheck
 
 # Build documentation
 cd docs
-python build.py
+uv run python build.py
 ```
+
+### Available Commands
+
+See all available commands:
+
+```bash
+just --list
+```
+
+Common commands:
+- `just test` - Run pytest
+- `just typecheck` - Run mypy type checking
+- `just check` - Run both tests and type checking
+- `just review-pr <number>` - Review a PR with diff
+- `just merge-pr <number>` - Merge a PR
 
 ## License
 
