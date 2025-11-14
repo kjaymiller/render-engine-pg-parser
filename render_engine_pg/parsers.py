@@ -109,9 +109,9 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
         """
         Creates a new entry: inserts markdown content to database and executes template queries.
 
-        Supports t-string-like templates in insert_sql for parameterized queries.
-        Templates are defined in pyproject.toml with {variable} placeholders that are
-        substituted from frontmatter attributes.
+        Supports t-string-style templates in insert_sql with {variable} placeholders that are
+        safely interpolated from frontmatter attributes using Python string formatting.
+        Templates are defined in pyproject.toml and filled using .format(**data) for Python 3.14+ compatibility.
 
         Args:
             content: Markdown content with optional YAML frontmatter
@@ -167,9 +167,10 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
             if insert_sql_list and connection:
                 with connection.cursor() as cur:
                     for insert_sql_template in insert_sql_list:
-                        # Pass template with {variable} placeholders directly to psycopg
-                        # psycopg handles safe parameterization
-                        cur.execute(insert_sql_template, frontmatter_data)
+                        # Use safe string formatting to interpolate {placeholders} from frontmatter data
+                        # Python's str.format() handles the substitution safely
+                        formatted_query = insert_sql_template.format(**frontmatter_data)
+                        cur.execute(formatted_query)
                 connection.commit()
 
         # Build SQL INSERT query for main content entry

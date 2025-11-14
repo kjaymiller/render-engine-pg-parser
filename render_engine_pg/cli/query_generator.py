@@ -113,7 +113,7 @@ class InsertionQueryGenerator:
         # Build column list and placeholder values
         col_str = ", ".join(columns_to_insert)
 
-        # Generate example values using {key} placeholders
+        # Generate values using {key} placeholders for t-string interpolation (Python 3.14+)
         values = []
         for col in columns_to_insert:
             # Check if this column is a foreign key
@@ -131,7 +131,7 @@ class InsertionQueryGenerator:
                 )
                 values.append(f"{{{rel['target']}_id}}")
             else:
-                # Use {key} placeholder
+                # Use {key} placeholder for t-string interpolation
                 values.append(f"{{{col}}}")
 
         values_str = ", ".join(values)
