@@ -1,6 +1,7 @@
 import pdb
 import frontmatter
 import re
+from typing import Any
 from psycopg.rows import dict_row
 from render_engine_parser import BasePageParser
 from render_engine_markdown import MarkdownPageParser
@@ -82,7 +83,7 @@ class PGPageParser(BasePageParser):
 
 class PGMarkdownCollectionParser(MarkdownPageParser):
     @staticmethod
-    def parse(content: str, extras: dict[str, any] | None = None) -> str:
+    def parse(content: str, extras: dict[str, Any] | None = None) -> str:
         """
         Parse markdown content with default extras enabled.
         Ensures fenced code blocks and other common markdown features are available.
@@ -97,13 +98,14 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
             markdown_extras = default_extras
 
         # Call parent class parse with the extras dict
-        return MarkdownPageParser.parse(
+        result = MarkdownPageParser.parse(
             content,
             extras={"markdown_extras": markdown_extras}
         )
+        return str(result)
 
     @staticmethod
-    def create_entry(*, content: str = "Hello World", **kwargs) -> str:
+    def create_entry(*, content: str = "Hello World", **kwargs: Any) -> str:
         """
         Creates a new entry: inserts markdown content to database and executes template queries.
 
@@ -138,8 +140,8 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
             1. Execute: INSERT INTO post_stats (post_id) VALUES (42)
             2. Execute: INSERT INTO posts (id, title, content) VALUES (42, 'My Post', '# Content')
         """
-        connection = kwargs.get("connection")
-        collection_name = kwargs.get("collection_name")
+        connection: Any = kwargs.get("connection")
+        collection_name: Any = kwargs.get("collection_name")
 
         # Parse markdown with frontmatter first to get context for template substitution
         post = frontmatter.loads(content)
@@ -162,7 +164,7 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
             settings = PGSettings()
             insert_sql_list = settings.get_insert_sql(collection_name)
 
-            if insert_sql_list:
+            if insert_sql_list and connection:
                 with connection.cursor() as cur:
                     for insert_sql_template in insert_sql_list:
                         # Pass template with {variable} placeholders directly to psycopg
@@ -175,15 +177,20 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
         values = list(frontmatter_data.values())
 
         # Use psycopg's sql module for safe parameterization
+        table_name: Any = kwargs.get("table")
         insert_query = sql.SQL("INSERT INTO {} ({}) VALUES ({})").format(
-            sql.Identifier(str(kwargs.get("table").casefold())),
+            sql.Identifier(str(table_name.casefold())),
             sql.SQL(", ").join(map(sql.Identifier, columns)),
             sql.SQL(", ").join(sql.Placeholder() * len(values)),
         )
 
         # Execute the query
-        with connection.cursor() as cur:
-            cur.execute(insert_query, values)
-            connection.commit()
+        if connection:
+            with connection.cursor() as cur:
+                cur.execute(insert_query, values)
+                connection.commit()
 
-        return insert_query.as_string(connection)
+            result = insert_query.as_string(connection)
+            return str(result)
+
+        return str(insert_query)

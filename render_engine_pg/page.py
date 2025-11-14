@@ -14,4 +14,5 @@ class PGPage(Page):
             setattr(self, key, value)
 
     def render(self, route: str | Path, theme_manager: ThemeManager) -> int:
-        super().render(route=route, theme_manager=theme_manager)
+        result = super().render(route=route, theme_manager=theme_manager)
+        return result if isinstance(result, int) else 0

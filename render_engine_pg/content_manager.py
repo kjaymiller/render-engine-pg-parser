@@ -1,6 +1,8 @@
+from pathlib import Path
+import subprocess
 from psycopg.rows import class_row
 from render_engine.content_managers import ContentManager
-from typing import Generator, Iterable, Optional
+from typing import Generator, Iterable, Optional, Any
 from .connection import PostgresQuery
 from .page import PGPage
 
@@ -10,13 +12,13 @@ class PostgresContentManager(ContentManager):
 
     def __init__(
         self,
-        collection,
+        collection: Any,
         *,
         postgres_query: Optional[PostgresQuery] = None,
-        connection: Optional[object] = None,
+        connection: Optional[Any] = None,
         collection_name: Optional[str] = None,
-        **kwargs,
-    ):
+        **kwargs: object,
+    ) -> None:
         """
         Initialize content manager.
 
@@ -48,7 +50,7 @@ class PostgresContentManager(ContentManager):
         else:
             raise ValueError("Either 'postgres_query' or 'connection' must be provided")
 
-        self._pages = None
+        self._pages: list[PGPage] | None = None
         self.collection = collection
 
     def execute_query(self) -> Generator[PGPage, None, None]:
@@ -56,12 +58,13 @@ class PostgresContentManager(ContentManager):
         with self.postgres_query.connection.cursor(
             row_factory=class_row(PGPage)
         ) as cur:
-            cur.execute(self.postgres_query.query)
+            if self.postgres_query.query is not None:
+                cur.execute(self.postgres_query.query)
             for row in cur:
                 row.parser_extras = getattr(self.collection, "parser_extras", {})
                 row.routes = self.collection.routes
                 row.template = getattr(self.collection, "template", None)
-                row.collection = self.collection.to_dict()
+                setattr(row, "collection", self.collection.to_dict())
                 yield row
 
     @property
@@ -75,11 +78,11 @@ class PostgresContentManager(ContentManager):
 
     def create_entry(
         self,
-        filepath: Path = None,
-        editor: str = None,
-        metadata: dict = None,
-        content: str = None,
-    ):
+        filepath: Optional[Path] = None,
+        editor: Optional[str] = None,
+        metadata: Optional[dict] = None,
+        content: Optional[str] = None,
+    ) -> str:
         """Create a new entry"""
 
         if not filepath:

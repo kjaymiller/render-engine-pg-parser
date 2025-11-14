@@ -58,7 +58,7 @@ def main(
     objects: tuple,
     ignore_pk: bool,
     ignore_timestamps: bool,
-):
+) -> None:
     """Generate SQL insertion queries for render-engine objects from a .sql file."""
     try:
         # Validate file extension

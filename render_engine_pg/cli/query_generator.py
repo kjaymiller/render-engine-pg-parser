@@ -52,7 +52,7 @@ class InsertionQueryGenerator:
             Ordered list of objects
         """
         # Build dependency graph
-        dependencies = {obj["name"]: set() for obj in objects}
+        dependencies: Dict[str, set[str]] = {obj["name"]: set() for obj in objects}
 
         for rel in relationships:
             if rel["type"] == "foreign_key":
