@@ -15,7 +15,7 @@ class PGSettings:
     Looks for configuration under [tool.render-engine.pg] in pyproject.toml
     """
 
-    DEFAULT_SETTINGS = {
+    DEFAULT_SETTINGS: dict[str, Any] = {
         "read_sql": {},
         "insert_sql": {},
         "default_table": None,
@@ -53,7 +53,7 @@ class PGSettings:
 
     def _load_settings(self) -> dict[str, Any]:
         """Load settings from pyproject.toml."""
-        if not self.config_path or not self.config_path.exists():
+        if self.config_path is None or (isinstance(self.config_path, (str, Path)) and not Path(self.config_path).exists()):
             logger.warning(
                 f"pyproject.toml not found at {self.config_path}, using defaults"
             )

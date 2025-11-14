@@ -51,7 +51,7 @@ def main(
     verbose: bool,
     ignore_pk: bool,
     ignore_timestamps: bool,
-):
+) -> None:
     """
     Interactively classify SQL schema tables and generate TOML configuration.
 

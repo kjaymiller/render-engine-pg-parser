@@ -7,7 +7,7 @@ from typing import List, Dict, Any
 try:
     import tomli_w
 except ImportError:
-    tomli_w = None
+    tomli_w = None  # type: ignore[assignment]
 
 
 class TOMLConfigGenerator:
@@ -17,8 +17,8 @@ class TOMLConfigGenerator:
         self,
         ordered_objects: List[Dict[str, Any]],
         insert_queries: List[str],
-        read_queries: Dict[str, str] = None,
-        relationships: List[Dict[str, Any]] = None,
+        read_queries: Dict[str, str] | None = None,
+        relationships: List[Dict[str, Any]] | None = None,
     ) -> str:
         """
         Generate TOML configuration with insert_sql and read_sql statements.
@@ -54,7 +54,7 @@ class TOMLConfigGenerator:
                 primary_objects = [ordered_objects[0]]
             else:
                 # No objects to process, return empty config
-                config = {
+                config: Dict[str, Any] = {
                     "tool": {
                         "render-engine": {
                             "pg": {
@@ -63,7 +63,7 @@ class TOMLConfigGenerator:
                         }
                     }
                 }
-                return tomli_w.dumps(config)
+                return str(tomli_w.dumps(config))
 
         # Build insert_sql dictionary with one entry per collection/page
         insert_sql_dict = {}
@@ -122,7 +122,7 @@ class TOMLConfigGenerator:
             config["tool"]["render-engine"]["pg"]["read_sql"] = read_sql_dict
 
         # Generate TOML format
-        return tomli_w.dumps(config)
+        return str(tomli_w.dumps(config))
 
     def _get_objects_for_primary(
         self,
@@ -167,9 +167,13 @@ class TOMLConfigGenerator:
                                 break
                     # Also add the target/source that isn't the primary
                     if rel.get("source") == primary_name:
-                        belonging_names.add(rel.get("target"))
+                        target = rel.get("target")
+                        if target:
+                            belonging_names.add(target)
                     else:
-                        belonging_names.add(rel.get("source"))
+                        source = rel.get("source")
+                        if source:
+                            belonging_names.add(source)
 
         # Handle shared dependencies: include objects that don't FK to anything
         # These are typically attributes like 'tags' that collections use

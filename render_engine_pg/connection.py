@@ -8,9 +8,9 @@ def get_db_connection(
     *,
     host: str = "localhost",
     port: int = 5432,
-    database: str = None,
-    user: str = None,
-    password: str = None,
+    database: Optional[str] = None,
+    user: Optional[str] = None,
+    password: Optional[str] = None,
 ) -> Connection:
     """
     Connection factory (keyword-only arguments).
