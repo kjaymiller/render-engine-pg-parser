@@ -82,7 +82,7 @@ class PostgresContentManager(ContentManager):
         metadata: Optional[dict[str, Any]] = None,
         content: Optional[str] = None,
         table: Optional[str] = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> str:
         """
         Create a new database entry.
