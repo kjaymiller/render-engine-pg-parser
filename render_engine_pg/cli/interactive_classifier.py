@@ -32,7 +32,7 @@ class InteractiveClassifier:
         """
         self.verbose = verbose
         self.analyzer = RelationshipAnalyzer()
-        self.relationships = []
+        self.relationships: List[Dict[str, Any]] = []
 
     def classify_tables(
         self, objects: List[Dict[str, Any]], skip_annotated: bool = True

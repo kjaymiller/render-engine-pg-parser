@@ -50,3 +50,27 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = "frontmatter"
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "psycopg.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "tomli_w"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "tomllib"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "click"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "render_engine_parser"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "render_engine_markdown"
+ignore_missing_imports = true
