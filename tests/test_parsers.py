@@ -218,6 +218,7 @@ class TestPGMarkdownCollectionParserCreateEntryTemplates:
             "INSERT INTO posts (id, title) VALUES ({id}, {title})",
             "INSERT INTO metadata (id, author) VALUES ({id}, {author})",
         ]
+        mock_settings.get_read_sql.return_value = "SELECT id, title FROM posts"
         mocker.patch(
             "render_engine_pg.parsers.PGSettings", return_value=mock_settings
         )
@@ -298,3 +299,4 @@ title: My Post
         except KeyError as e:
             # One of the fields will be missing
             assert str(e.args[0]) in ("id", "slug")
+

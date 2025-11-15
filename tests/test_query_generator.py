@@ -662,3 +662,106 @@ class TestComplexScenarios:
         cat_idx = next(i for i, q in enumerate(queries) if "categories" in q)
         prod_idx = next(i for i, q in enumerate(queries) if "products" in q)
         assert cat_idx < prod_idx
+
+
+class TestIgnoredColumnsFiltering:
+    """Tests for filtering out ignored columns from INSERT statements."""
+
+    def test_ignored_columns_excluded_from_insert(self):
+        """Test that ignored_columns are excluded from INSERT statements."""
+        objects = [
+            {
+                "name": "posts",
+                "type": "collection",
+                "table": "posts",
+                "columns": ["id", "title", "content"],
+                "attributes": {
+                    "ignored_columns": ["id"]
+                },
+            }
+        ]
+        relationships = []
+
+        generator = InsertionQueryGenerator()
+        ordered_objects, queries = generator.generate(objects, relationships)
+
+        assert len(queries) == 1
+        # Should have INSERT with title and content, but NOT id
+        query = queries[0]
+        assert "INSERT INTO posts" in query
+        assert "title, content" in query or "content, title" in query
+        assert "id" not in query.split("(")[1].split(")")[0]  # id should not be in column list
+
+    def test_ignored_columns_with_multiple_columns(self):
+        """Test ignored columns filtering with multiple ignored columns."""
+        objects = [
+            {
+                "name": "users",
+                "type": "page",
+                "table": "users",
+                "columns": ["id", "name", "email", "created_at", "updated_at"],
+                "attributes": {
+                    "ignored_columns": ["id", "created_at", "updated_at"]
+                },
+            }
+        ]
+        relationships = []
+
+        generator = InsertionQueryGenerator()
+        ordered_objects, queries = generator.generate(objects, relationships)
+
+        query = queries[0]
+        assert "INSERT INTO users" in query
+        # Should only have name and email in the column list
+        assert "name" in query
+        assert "email" in query
+        # Should NOT have id, created_at, or updated_at in column list
+        column_part = query.split("(")[1].split(")")[0]
+        assert "id" not in column_part
+        assert "created_at" not in column_part
+        assert "updated_at" not in column_part
+
+    def test_no_ignored_columns_includes_all(self):
+        """Test that without ignored_columns, all columns are included."""
+        objects = [
+            {
+                "name": "posts",
+                "type": "collection",
+                "table": "posts",
+                "columns": ["id", "title", "content"],
+                "attributes": {},  # No ignored_columns
+            }
+        ]
+        relationships = []
+
+        generator = InsertionQueryGenerator()
+        ordered_objects, queries = generator.generate(objects, relationships)
+
+        query = queries[0]
+        assert "INSERT INTO posts" in query
+        # All columns should be present
+        assert "id" in query
+        assert "title" in query
+        assert "content" in query
+
+    def test_all_columns_ignored(self):
+        """Test edge case where all columns are ignored."""
+        objects = [
+            {
+                "name": "posts",
+                "type": "collection",
+                "table": "posts",
+                "columns": ["id", "title", "content"],
+                "attributes": {
+                    "ignored_columns": ["id", "title", "content"]
+                },
+            }
+        ]
+        relationships = []
+
+        generator = InsertionQueryGenerator()
+        ordered_objects, queries = generator.generate(objects, relationships)
+
+        # Should still generate a query (though it would be invalid SQL)
+        # The important thing is it doesn't error
+        assert len(queries) == 1

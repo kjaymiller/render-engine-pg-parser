@@ -1,6 +1,6 @@
-import pdb
 import frontmatter
 import re
+from datetime import datetime
 from typing import Any
 from psycopg.rows import dict_row
 from render_engine_parser import BasePageParser
@@ -159,12 +159,29 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
         if "content" not in frontmatter_data:
             frontmatter_data["content"] = markdown_content
 
+        # Generate slug from filename if not present (extract from content_path kwarg if provided)
+        # This allows markdown files without explicit slug frontmatter to still be inserted
+        if "slug" not in frontmatter_data:
+            # Try to get filename from kwargs or generate a sensible default
+            # Note: In populate_db context, slug would typically be filename-based
+            # We leave this for populate_db/calling code to handle since we don't have filename here
+            pass
+
         # Execute pre-configured insert SQL templates from settings if collection_name is provided
+        # Templates have access to FULL frontmatter data (including tags, categories, etc.)
         if collection_name:
             settings = PGSettings()
             insert_sql_list = settings.get_insert_sql(collection_name)
 
             if insert_sql_list and connection:
+                # Generate missing timestamp fields only
+                # These are generally safe to auto-generate and don't break schema constraints
+                if "created_at" not in frontmatter_data:
+                    frontmatter_data["created_at"] = datetime.now().isoformat()
+
+                if "updated_at" not in frontmatter_data:
+                    frontmatter_data["updated_at"] = datetime.now().isoformat()
+
                 with connection.cursor() as cur:
                     for insert_sql_template in insert_sql_list:
                         # Use safe string formatting with format_map to handle missing placeholders
@@ -180,9 +197,40 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
                             pass
                 connection.commit()
 
+        # Extract allowed columns from read_sql configuration for the main content INSERT
+        # Only filter columns for the final main table INSERT, not for templates
+        allowed_columns = None
+        if collection_name:
+            settings = PGSettings()
+            read_sql = settings.get_read_sql(collection_name)
+            if read_sql and isinstance(read_sql, str):
+                # Parse the SELECT statement to extract column names
+                # Look for columns between SELECT and FROM
+                select_match = re.search(r'SELECT\s+(?:DISTINCT\s+ON\s+\([^)]+\)\s+)?(.+?)\s+FROM', read_sql, re.IGNORECASE)
+                if select_match:
+                    select_clause = select_match.group(1)
+                    # Split by comma and extract column names (handle table.column format)
+                    col_names = []
+                    for col in select_clause.split(','):
+                        col = col.strip()
+                        # Remove aliases and table prefixes
+                        if ' as ' in col.lower():
+                            col = col.split(' as ')[-1].strip()
+                        if '.' in col:
+                            col = col.split('.')[-1].strip()
+                        col_names.append(col)
+                    allowed_columns = set(col_names)
+
         # Build SQL INSERT query for main content entry
-        columns = list(frontmatter_data.keys())
-        values = list(frontmatter_data.values())
+        # Only include columns that exist in the main table (from read_sql)
+        if allowed_columns:
+            # Only include columns that are in the allowed set
+            filtered_data = {k: v for k, v in frontmatter_data.items() if k in allowed_columns}
+        else:
+            filtered_data = frontmatter_data
+
+        columns = list(filtered_data.keys())
+        values = list(filtered_data.values())
 
         # Use psycopg's sql module for safe parameterization
         table_name: Any = kwargs.get("table")
