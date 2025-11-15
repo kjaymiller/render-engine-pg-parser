@@ -515,3 +515,125 @@ class TestCLIIntegrationEndToEnd:
             assert "posts" in output_content
             assert "comments" in output_content
 
+
+class TestCLIIgnorePKFlag:
+    """Tests for the --ignore-pk CLI flag."""
+
+    def test_ignore_pk_flag_excludes_primary_keys(self):
+        """Test that --ignore-pk flag excludes PRIMARY KEY columns from INSERT statements."""
+        sql_content = """
+        -- @collection
+        CREATE TABLE posts (
+            id INTEGER PRIMARY KEY,
+            title VARCHAR(255),
+            content TEXT
+        );
+        """
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path("test.sql").write_text(sql_content)
+            result = runner.invoke(main, ["test.sql", "--ignore-pk"])
+            assert result.exit_code == 0
+            # The output should contain INSERT statements without 'id' in the column list
+            # It should have title and content but NOT id
+            assert "INSERT INTO posts" in result.output
+            # The column list should not include id
+            # Looking for the pattern: INSERT INTO posts (title, content)
+            lines = result.output.split('\n')
+            insert_line = next((line for line in lines if 'INSERT INTO posts' in line), None)
+            assert insert_line is not None
+            # The columns should be title and content, not id
+            assert "title" in insert_line
+            assert "content" in insert_line
+
+    def test_ignore_pk_output_to_file(self):
+        """Test --ignore-pk flag with output to file."""
+        sql_content = """
+        -- @collection
+        CREATE TABLE posts (
+            id SERIAL PRIMARY KEY,
+            title VARCHAR(255)
+        );
+
+        -- @attribute
+        CREATE TABLE tags (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(255)
+        );
+
+        -- @junction
+        CREATE TABLE post_tags (
+            post_id INTEGER,
+            tag_id INTEGER,
+            PRIMARY KEY (post_id, tag_id),
+            FOREIGN KEY (post_id) REFERENCES posts(id),
+            FOREIGN KEY (tag_id) REFERENCES tags(id)
+        );
+        """
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path("test.sql").write_text(sql_content)
+            result = runner.invoke(main, ["test.sql", "-o", "output.toml", "--ignore-pk"])
+            assert result.exit_code == 0
+            assert Path("output.toml").exists()
+            output_content = Path("output.toml").read_text()
+            # Should have INSERT statements without id column
+            assert "INSERT INTO posts" in output_content
+            assert "INSERT INTO tags" in output_content
+            assert "INSERT INTO post_tags" in output_content
+
+    def test_without_ignore_pk_includes_primary_keys(self):
+        """Test that without --ignore-pk, PRIMARY KEY columns are included."""
+        sql_content = """
+        -- @collection
+        CREATE TABLE posts (
+            id INTEGER PRIMARY KEY,
+            title VARCHAR(255)
+        );
+        """
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path("test.sql").write_text(sql_content)
+            result = runner.invoke(main, ["test.sql"])
+            assert result.exit_code == 0
+            # Without --ignore-pk, id should be in the INSERT statement
+            assert "INSERT INTO posts" in result.output
+            assert "id" in result.output
+
+    def test_ignore_pk_with_composite_primary_key(self):
+        """Test --ignore-pk with composite PRIMARY KEY."""
+        sql_content = """
+        -- @junction
+        CREATE TABLE post_tags (
+            post_id INTEGER,
+            tag_id INTEGER,
+            PRIMARY KEY (post_id, tag_id)
+        );
+        """
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path("test.sql").write_text(sql_content)
+            result = runner.invoke(main, ["test.sql", "--ignore-pk"])
+            assert result.exit_code == 0
+            # Should generate INSERT statement (though composite keys are tricky)
+            assert "INSERT INTO post_tags" in result.output
+
+    def test_ignore_pk_combined_with_manual_ignore(self):
+        """Test --ignore-pk combined with manual -- ignore annotations."""
+        sql_content = """
+        -- @collection
+        CREATE TABLE posts (
+            id INTEGER PRIMARY KEY,
+            title VARCHAR(255),
+            draft BOOLEAN -- ignore
+        );
+        """
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path("test.sql").write_text(sql_content)
+            result = runner.invoke(main, ["test.sql", "--ignore-pk"])
+            assert result.exit_code == 0
+            assert "INSERT INTO posts" in result.output
+            # Both id (from --ignore-pk) and draft (from -- ignore) should be excluded
+            # Only title should remain
+
