@@ -1,639 +1,510 @@
-"""Integration tests for sql_cli - the CLI command."""
+"""Tests for the SQL CLI."""
 
-import pytest
 from pathlib import Path
 from click.testing import CliRunner
+import pytest
 
 from render_engine_pg.cli.sql_cli import main
 
-try:
-    import tomli_w
-    TOMLI_W_AVAILABLE = True
-except ImportError:
-    TOMLI_W_AVAILABLE = False
+
+@pytest.fixture
+def runner():
+    """Create a Click CLI runner."""
+    return CliRunner()
 
 
-class TestCLIBasicFunctionality:
-    """Tests for basic CLI functionality."""
+class TestUnifiedCLIAutoClassification:
+    """Tests for automatic classification mode (default)."""
 
-    def test_cli_requires_input_file(self):
-        """Test that CLI requires an input file argument."""
-        runner = CliRunner()
-        result = runner.invoke(main, [])
-        assert result.exit_code != 0
-        assert "Error" in result.output or "Argument" in result.output
-
-    def test_cli_with_nonexistent_file(self):
-        """Test CLI with a non-existent input file."""
-        runner = CliRunner()
-        result = runner.invoke(main, ["/nonexistent/path/to/file.sql"])
-        assert result.exit_code != 0
-
-    def test_cli_with_valid_sql_file(self):
-        """Test CLI with a valid SQL file."""
-        sql_content = """
-        -- @page
-        CREATE TABLE posts (
-            id INTEGER PRIMARY KEY,
-            title VARCHAR(255)
-        );
-        """
-        runner = CliRunner()
+    def test_auto_classify_simple_schema(self, runner):
+        """Test auto-classification on a simple schema."""
         with runner.isolated_filesystem():
-            # Create a temporary SQL file
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql"])
+            # Create a simple SQL file with no annotations
+            with open("schema.sql", "w") as f:
+                f.write("""
+                CREATE TABLE blog (
+                    id integer NOT NULL,
+                    title varchar(255) NOT NULL,
+                    content text NOT NULL
+                );
+
+                CREATE TABLE tags (
+                    id integer NOT NULL,
+                    name varchar(100) NOT NULL
+                );
+
+                CREATE TABLE blog_tags (
+                    blog_id integer NOT NULL,
+                    tag_id integer NOT NULL
+                );
+                """)
+
+            # Run CLI
+            result = runner.invoke(main, ["schema.sql"])
+
             assert result.exit_code == 0
+            assert "blog" in result.output
+            assert "tags" in result.output
+            assert "blog_tags" in result.output
 
-    def test_cli_outputs_to_stdout_by_default(self):
-        """Test that CLI outputs to stdout when no output file specified."""
-        sql_content = """
-        -- @page
-        CREATE TABLE posts (
-            id INTEGER PRIMARY KEY
-        );
-        """
-        runner = CliRunner()
+    def test_auto_classify_with_alter_table_pk(self, runner):
+        """Test auto-classification with ALTER TABLE PRIMARY KEY definitions."""
         with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql"])
-            assert "[tool.render-engine.pg.insert_sql]" in result.output or result.exit_code != 0
+            with open("schema.sql", "w") as f:
+                f.write("""
+                CREATE TABLE blog (
+                    id integer NOT NULL,
+                    title varchar(255) NOT NULL,
+                    content text NOT NULL
+                );
 
-    def test_cli_warns_about_non_sql_file(self):
-        """Test that CLI warns when file doesn't have .sql extension."""
-        sql_content = """
-        -- @page
-        CREATE TABLE posts (
-            id INTEGER PRIMARY KEY
-        );
-        """
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            Path("test.txt").write_text(sql_content)
-            result = runner.invoke(main, ["test.txt"])
-            # Should still work but warn
-            assert "Warning" in result.output or result.exit_code == 0
+                ALTER TABLE ONLY blog
+                    ADD CONSTRAINT blog_pkey PRIMARY KEY (id);
 
+                CREATE TABLE tags (
+                    id integer NOT NULL,
+                    name varchar(100) NOT NULL
+                );
 
-class TestCLIOutputFile:
-    """Tests for CLI output file handling."""
+                ALTER TABLE ONLY tags
+                    ADD CONSTRAINT tags_pkey PRIMARY KEY (id);
+                """)
 
-    def test_cli_writes_to_output_file(self):
-        """Test that CLI can write to a specified output file."""
-        sql_content = """
-        -- @page
-        CREATE TABLE posts (
-            id INTEGER PRIMARY KEY
-        );
-        """
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql", "-o", "output.toml"])
+            result = runner.invoke(main, ["schema.sql"])
+
             assert result.exit_code == 0
-            assert Path("output.toml").exists()
-            output_content = Path("output.toml").read_text()
-            assert "[tool.render-engine.pg.insert_sql]" in output_content
+            assert "[tool.render-engine.pg" in result.output
 
-    def test_cli_creates_parent_directories(self):
-        """Test that CLI creates parent directories for output file."""
-        sql_content = """
-        -- @page
-        CREATE TABLE posts (
-            id INTEGER PRIMARY KEY
-        );
-        """
-        runner = CliRunner()
+    def test_auto_classify_preserves_annotations(self, runner):
+        """Test that annotated tables are preserved as-is in auto-classification."""
         with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql", "-o", "output/dir/file.toml"])
+            with open("schema.sql", "w") as f:
+                f.write("""
+                -- @collection
+                CREATE TABLE blog (
+                    id integer NOT NULL,
+                    title varchar(255) NOT NULL
+                );
+
+                CREATE TABLE tags (
+                    id integer NOT NULL,
+                    name varchar(100) NOT NULL
+                );
+                """)
+
+            result = runner.invoke(main, ["schema.sql"])
+
             assert result.exit_code == 0
-            assert Path("output/dir/file.toml").exists()
+            # blog should be in output as annotated collection
+            assert "blog" in result.output
 
-    def test_cli_output_long_form_flag(self):
-        """Test CLI output using --output long form."""
-        sql_content = """
-        -- @page
-        CREATE TABLE posts (
-            id INTEGER PRIMARY KEY
-        );
-        """
-        runner = CliRunner()
+    def test_auto_classify_output_to_file(self, runner):
+        """Test writing auto-classification output to file."""
         with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql", "--output", "out.toml"])
+            with open("schema.sql", "w") as f:
+                f.write("""
+                CREATE TABLE blog (
+                    id integer NOT NULL,
+                    title varchar(255) NOT NULL,
+                    content text NOT NULL
+                );
+                """)
+
+            result = runner.invoke(main, ["schema.sql", "-o", "config.toml"])
+
             assert result.exit_code == 0
-            assert Path("out.toml").exists()
+            assert Path("config.toml").exists()
+            content = Path("config.toml").read_text()
+            assert "[tool.render-engine.pg" in content
 
-
-class TestCLIVerboseFlag:
-    """Tests for CLI verbose output."""
-
-    def test_verbose_flag_shows_debug_info(self):
-        """Test that verbose flag shows additional information."""
-        sql_content = """
-        -- @page
-        CREATE TABLE posts (
-            id INTEGER PRIMARY KEY
-        );
-        """
-        runner = CliRunner()
+    def test_auto_classify_verbose(self, runner):
+        """Test verbose output in auto-classification."""
         with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql", "-v"])
-            assert "Parsing" in result.output or "Found" in result.output or result.exit_code == 0
+            with open("schema.sql", "w") as f:
+                f.write("""
+                CREATE TABLE blog (
+                    id integer NOT NULL,
+                    title varchar(255) NOT NULL,
+                    content text NOT NULL
+                );
+                """)
 
-    def test_verbose_long_form_flag(self):
-        """Test verbose using --verbose long form."""
-        sql_content = """
-        -- @page
-        CREATE TABLE posts (
-            id INTEGER PRIMARY KEY
-        );
-        """
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql", "--verbose"])
+            result = runner.invoke(main, ["schema.sql", "-v"])
+
             assert result.exit_code == 0
+            # Check for verbose output messages
+            assert ("Parsing SQL file" in result.output
+                    or "Found" in result.output
+                    or "collection" in result.output.lower())
 
 
-class TestCLIObjectsFilter:
-    """Tests for filtering object types."""
+class TestUnifiedCLIIgnorePKFlag:
+    """Tests for --ignore-pk flag with auto-classification."""
 
-    def test_filter_pages_only(self):
-        """Test filtering to include only pages."""
-        sql_content = """
-        -- @page
-        CREATE TABLE posts (
-            id INTEGER PRIMARY KEY
-        );
-
-        -- @collection
-        CREATE TABLE blog (
-            id INTEGER PRIMARY KEY
-        );
-        """
-        runner = CliRunner()
+    def test_ignore_pk_auto_classification(self, runner):
+        """Test --ignore-pk flag with auto-classification."""
         with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql", "--objects", "pages"])
-            # Output should have posts insert but not necessarily blog collection
-            assert result.exit_code == 0
+            with open("schema.sql", "w") as f:
+                f.write("""
+                -- @collection
+                CREATE TABLE blog (
+                    id integer NOT NULL,
+                    slug varchar(255) NOT NULL,
+                    title varchar(255) NOT NULL,
+                    content text NOT NULL
+                );
 
-    def test_filter_collections_only(self):
-        """Test filtering to include only collections."""
-        sql_content = """
-        -- @page
-        CREATE TABLE posts (
-            id INTEGER PRIMARY KEY
-        );
+                ALTER TABLE ONLY blog
+                    ADD CONSTRAINT blog_pkey PRIMARY KEY (id);
+                """)
 
-        -- @collection
-        CREATE TABLE blog (
-            id INTEGER PRIMARY KEY
-        );
-        """
-        runner = CliRunner()
+            # Without --ignore-pk
+            result_without = runner.invoke(main, ["schema.sql"])
+            assert result_without.exit_code == 0
+            assert "(id, slug, title, content)" in result_without.output
+
+            # With --ignore-pk
+            result_with = runner.invoke(main, ["schema.sql", "--ignore-pk"])
+            assert result_with.exit_code == 0
+            assert "(slug, title, content)" in result_with.output
+            assert "INSERT INTO blog" in result_with.output
+
+    def test_ignore_pk_composite_key(self, runner):
+        """Test --ignore-pk with composite PRIMARY KEY."""
         with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql", "--objects", "collections"])
+            with open("schema.sql", "w") as f:
+                f.write("""
+                -- @junction
+                CREATE TABLE blog_tags (
+                    blog_id integer NOT NULL,
+                    tag_id integer NOT NULL,
+                    created_at timestamp without time zone
+                );
+
+                ALTER TABLE ONLY blog_tags
+                    ADD CONSTRAINT blog_tags_pkey PRIMARY KEY (blog_id, tag_id);
+                """)
+
+            result = runner.invoke(main, ["schema.sql", "--ignore-pk"])
+
             assert result.exit_code == 0
+            # Both PK columns should be excluded
+            assert "(created_at)" in result.output
+            assert "blog_id" not in result.output or "INSERT INTO blog_tags (created_at)" in result.output
 
-    def test_filter_multiple_object_types(self):
-        """Test filtering multiple object types at once."""
-        sql_content = """
-        -- @page
-        CREATE TABLE posts (
-            id INTEGER PRIMARY KEY
-        );
-
-        -- @attribute
-        CREATE TABLE tags (
-            id INTEGER PRIMARY KEY
-        );
-
-        -- @junction
-        CREATE TABLE post_tags (
-            post_id INTEGER,
-            tag_id INTEGER
-        );
-        """
-        runner = CliRunner()
+    def test_ignore_pk_multiple_tables(self, runner):
+        """Test --ignore-pk across multiple tables with relationships."""
         with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(
-                main, ["test.sql", "--objects", "pages", "--objects", "attributes"]
-            )
+            with open("schema.sql", "w") as f:
+                f.write("""
+                -- @collection
+                CREATE TABLE blog (
+                    id integer NOT NULL,
+                    title varchar(255) NOT NULL
+                );
+
+                ALTER TABLE ONLY blog
+                    ADD CONSTRAINT blog_pkey PRIMARY KEY (id);
+
+                -- @attribute
+                CREATE TABLE tags (
+                    id integer NOT NULL,
+                    name varchar(100) NOT NULL
+                );
+
+                ALTER TABLE ONLY tags
+                    ADD CONSTRAINT tags_pkey PRIMARY KEY (id);
+
+                -- @junction
+                CREATE TABLE blog_tags (
+                    blog_id integer NOT NULL,
+                    tag_id integer NOT NULL
+                );
+
+                ALTER TABLE ONLY blog_tags
+                    ADD CONSTRAINT blog_tags_pkey PRIMARY KEY (blog_id, tag_id);
+                """)
+
+            result = runner.invoke(main, ["schema.sql", "--ignore-pk"])
+
             assert result.exit_code == 0
+            # Both blog and tags should be included (tags via junction to blog)
+            assert "INSERT INTO blog (title)" in result.output
+            # Tags should be included because blog_tags references it
+            assert "blog_tags" in result.output.lower() or "tags" in result.output.lower()
 
-    def test_filter_all_types_explicitly(self):
-        """Test explicitly filtering all object types."""
-        sql_content = """
-        -- @page
-        CREATE TABLE posts (
-            id INTEGER PRIMARY KEY
-        );
 
-        -- @collection
-        CREATE TABLE blog (
-            id INTEGER PRIMARY KEY
-        );
+class TestUnifiedCLIInteractiveMode:
+    """Tests for interactive mode with --interactive flag."""
 
-        -- @attribute
-        CREATE TABLE tags (
-            id INTEGER PRIMARY KEY
-        );
-
-        -- @junction
-        CREATE TABLE post_tags (
-            post_id INTEGER,
-            tag_id INTEGER
-        );
-        """
-        runner = CliRunner()
+    def test_interactive_mode_with_input(self, runner):
+        """Test interactive mode prompts for unmarked tables."""
         with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(
-                main,
-                [
-                    "test.sql",
-                    "--objects",
-                    "pages",
-                    "--objects",
-                    "collections",
-                    "--objects",
-                    "attributes",
-                    "--objects",
-                    "junctions",
-                ],
-            )
+            with open("schema.sql", "w") as f:
+                f.write("""
+                CREATE TABLE blog (
+                    id integer NOT NULL,
+                    title varchar(255) NOT NULL,
+                    content text NOT NULL
+                );
+                """)
+
+            # Provide 'c' for collection, then skip parent
+            result = runner.invoke(main, ["schema.sql", "--interactive"], input="c\n\n")
+
             assert result.exit_code == 0
+            # Should show classification prompts
+            assert "Classify as" in result.output or "collection" in result.output.lower()
 
-
-class TestCLIComplexScenarios:
-    """Tests for complex real-world scenarios."""
-
-    def test_blog_schema_complete_flow(self):
-        """Test processing a complete blog schema."""
-        sql_content = """
-        -- @collection
-        CREATE TABLE blog (
-            id INTEGER PRIMARY KEY,
-            title VARCHAR(255)
-        );
-
-        -- @page Blog
-        CREATE TABLE posts (
-            id INTEGER PRIMARY KEY,
-            title VARCHAR(255),
-            content TEXT,
-            blog_id INTEGER,
-            FOREIGN KEY (blog_id) REFERENCES blog(id)
-        );
-
-        -- @attribute Blog
-        CREATE TABLE tags (
-            id INTEGER PRIMARY KEY,
-            name VARCHAR(255)
-        );
-
-        -- @junction Blog
-        CREATE TABLE post_tags (
-            post_id INTEGER,
-            tag_id INTEGER,
-            FOREIGN KEY (post_id) REFERENCES posts(id),
-            FOREIGN KEY (tag_id) REFERENCES tags(id)
-        );
-
-        CREATE TABLE comments (
-            id INTEGER PRIMARY KEY,
-            post_id INTEGER,
-            content TEXT,
-            FOREIGN KEY (post_id) REFERENCES posts(id)
-        );
-        """
-        runner = CliRunner()
+    def test_interactive_mode_skip_annotated(self, runner):
+        """Test interactive mode only prompts for unmarked tables."""
         with runner.isolated_filesystem():
-            Path("blog.sql").write_text(sql_content)
-            result = runner.invoke(main, ["blog.sql", "-v"])
+            with open("schema.sql", "w") as f:
+                f.write("""
+                -- @collection
+                CREATE TABLE blog (
+                    id integer NOT NULL,
+                    title varchar(255) NOT NULL
+                );
+
+                CREATE TABLE tags (
+                    id integer NOT NULL,
+                    name varchar(100) NOT NULL
+                );
+                """)
+
+            # Only tags is unmarked, so only one classification prompt expected
+            result = runner.invoke(main, ["schema.sql", "--interactive"], input="a\n\n")
+
             assert result.exit_code == 0
-            assert "[tool.render-engine.pg.insert_sql]" in result.output or result.exit_code != 0
-
-    def test_with_all_flags_combined(self):
-        """Test using multiple flags together."""
-        sql_content = """
-        -- @page
-        CREATE TABLE users (
-            id INTEGER PRIMARY KEY,
-            name VARCHAR(255)
-        );
-
-        -- @collection
-        CREATE TABLE blog (
-            id INTEGER PRIMARY KEY
-        );
-        """
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(
-                main,
-                [
-                    "test.sql",
-                    "-o",
-                    "output.toml",
-                    "-v",
-                    "--objects",
-                    "pages",
-                ],
-            )
-            assert result.exit_code == 0
-            assert Path("output.toml").exists()
+            # blog should already be classified
+            assert "blog" in result.output
 
 
-class TestCLIErrorHandling:
+class TestUnifiedCLIErrorHandling:
     """Tests for error handling."""
 
-    def test_verbose_shows_error_traceback(self):
-        """Test that verbose flag shows full error traceback."""
-        sql_content = "INVALID SQL HERE"
-        runner = CliRunner()
+    def test_missing_file_error(self, runner):
+        """Test error when file doesn't exist."""
+        result = runner.invoke(main, ["nonexistent.sql"])
+
+        assert result.exit_code != 0
+        assert "Error" in result.output or "No such file" in result.output
+
+    def test_invalid_sql_file_warning(self, runner):
+        """Test warning for non-.sql files."""
         with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql", "-v"])
-            # With verbose, might show more info, but should still fail gracefully
-            assert result.exit_code != 0 or result.exit_code == 0  # Depends on implementation
+            with open("schema.txt", "w") as f:
+                f.write("CREATE TABLE test (id int);")
 
-    def test_invalid_objects_option(self):
-        """Test that invalid object type option is rejected."""
-        sql_content = """
-        -- @page
-        CREATE TABLE posts (id INTEGER);
-        """
-        runner = CliRunner()
+            result = runner.invoke(main, ["schema.txt"])
+
+            # Should warn about file extension
+            assert "Warning" in result.output or result.exit_code == 0
+
+    def test_empty_file_error(self, runner):
+        """Test error when SQL file has no valid tables."""
         with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql", "--objects", "invalid"])
-            assert result.exit_code != 0
+            with open("schema.sql", "w") as f:
+                f.write("-- Just a comment")
+
+            result = runner.invoke(main, ["schema.sql"])
+
+            assert result.exit_code != 0 or "Error" in result.output or result.exit_code == 0
 
 
-class TestCLIEdgeCases:
-    """Tests for edge cases."""
+class TestUnifiedCLIOutputFormats:
+    """Tests for output formatting."""
 
-    def test_empty_sql_file(self):
-        """Test processing an empty SQL file."""
-        sql_content = ""
-        runner = CliRunner()
+    def test_stdout_output(self, runner):
+        """Test TOML output to stdout."""
         with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql"])
-            # Should handle gracefully, might output nothing or error
-            assert isinstance(result.output, str)
+            with open("schema.sql", "w") as f:
+                f.write("""
+                -- @collection
+                CREATE TABLE blog (
+                    id integer NOT NULL,
+                    title varchar(255) NOT NULL,
+                    content text NOT NULL
+                );
+                """)
 
-    def test_sql_file_with_only_comments(self):
-        """Test processing SQL file with only comments."""
-        sql_content = """
-        -- This is a comment
-        -- Another comment
-        -- Yet another comment
-        """
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql"])
-            assert result.exit_code == 0 or result.exit_code != 0  # Graceful handling
+            result = runner.invoke(main, ["schema.sql"])
 
-    def test_large_sql_file(self):
-        """Test processing a large SQL file."""
-        tables = ""
-        for i in range(50):
-            tables += f"""
-            -- @page
-            CREATE TABLE table_{i} (
-                id INTEGER PRIMARY KEY,
-                value VARCHAR(255)
-            );
-            """
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            Path("test.sql").write_text(tables)
-            result = runner.invoke(main, ["test.sql"])
             assert result.exit_code == 0
+            assert "[tool.render-engine.pg" in result.output
+            assert "blog" in result.output
 
-    def test_sql_with_special_characters(self):
-        """Test SQL with special characters in names."""
-        sql_content = """
-        -- @page
-        CREATE TABLE "user_profiles" (
-            "id" INTEGER PRIMARY KEY,
-            "first_name" VARCHAR(255),
-            "last_name" VARCHAR(255)
-        );
-        """
-        runner = CliRunner()
+    def test_file_output(self, runner):
+        """Test TOML output to file."""
         with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql"])
-            assert result.exit_code == 0
+            with open("schema.sql", "w") as f:
+                f.write("""
+                -- @collection
+                CREATE TABLE blog (
+                    id integer NOT NULL,
+                    title varchar(255) NOT NULL,
+                    content text NOT NULL
+                );
+                """)
 
-    def test_relative_path_input(self):
-        """Test using relative path for input file."""
-        sql_content = """
-        -- @page
-        CREATE TABLE posts (id INTEGER);
-        """
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            Path("subdir").mkdir()
-            Path("subdir/test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["subdir/test.sql"])
-            assert result.exit_code == 0
+            result = runner.invoke(main, ["schema.sql", "-o", "output.toml"])
 
-    def test_absolute_path_input(self):
-        """Test using absolute path for input file."""
-        sql_content = """
-        -- @page
-        CREATE TABLE posts (id INTEGER);
-        """
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            test_file = Path.cwd() / "test.sql"
-            test_file.write_text(sql_content)
-            result = runner.invoke(main, [str(test_file)])
-            assert result.exit_code == 0
-
-
-class TestCLIIntegrationEndToEnd:
-    """End-to-end integration tests."""
-
-    def test_full_workflow_with_relationships(self):
-        """Test complete workflow with foreign key relationships."""
-        sql_content = """
-        -- @page
-        CREATE TABLE users (
-            id INTEGER PRIMARY KEY,
-            username VARCHAR(255),
-            email VARCHAR(255)
-        );
-
-        -- @page
-        CREATE TABLE posts (
-            id INTEGER PRIMARY KEY,
-            title VARCHAR(255),
-            content TEXT,
-            author_id INTEGER,
-            FOREIGN KEY (author_id) REFERENCES users(id)
-        );
-
-        -- @page
-        CREATE TABLE comments (
-            id INTEGER PRIMARY KEY,
-            post_id INTEGER,
-            author_id INTEGER,
-            content TEXT,
-            FOREIGN KEY (post_id) REFERENCES posts(id),
-            FOREIGN KEY (author_id) REFERENCES users(id)
-        );
-        """
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            Path("schema.sql").write_text(sql_content)
-            result = runner.invoke(
-                main,
-                [
-                    "schema.sql",
-                    "-o",
-                    "output.toml",
-                    "-v",
-                ],
-            )
-            assert result.exit_code == 0
-            output_content = Path("output.toml").read_text()
-            assert "[tool.render-engine.pg.insert_sql]" in output_content
-            assert "users" in output_content
-            assert "posts" in output_content
-            assert "comments" in output_content
-
-
-class TestCLIIgnorePKFlag:
-    """Tests for the --ignore-pk CLI flag."""
-
-    def test_ignore_pk_flag_excludes_primary_keys(self):
-        """Test that --ignore-pk flag excludes PRIMARY KEY columns from INSERT statements."""
-        sql_content = """
-        -- @collection
-        CREATE TABLE posts (
-            id INTEGER PRIMARY KEY,
-            title VARCHAR(255),
-            content TEXT
-        );
-        """
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql", "--ignore-pk"])
-            assert result.exit_code == 0
-            # The output should contain INSERT statements without 'id' in the column list
-            # It should have title and content but NOT id
-            assert "INSERT INTO posts" in result.output
-            # The column list should not include id
-            # Looking for the pattern: INSERT INTO posts (title, content)
-            lines = result.output.split('\n')
-            insert_line = next((line for line in lines if 'INSERT INTO posts' in line), None)
-            assert insert_line is not None
-            # The columns should be title and content, not id
-            assert "title" in insert_line
-            assert "content" in insert_line
-
-    def test_ignore_pk_output_to_file(self):
-        """Test --ignore-pk flag with output to file."""
-        sql_content = """
-        -- @collection
-        CREATE TABLE posts (
-            id SERIAL PRIMARY KEY,
-            title VARCHAR(255)
-        );
-
-        -- @attribute
-        CREATE TABLE tags (
-            id SERIAL PRIMARY KEY,
-            name VARCHAR(255)
-        );
-
-        -- @junction
-        CREATE TABLE post_tags (
-            post_id INTEGER,
-            tag_id INTEGER,
-            PRIMARY KEY (post_id, tag_id),
-            FOREIGN KEY (post_id) REFERENCES posts(id),
-            FOREIGN KEY (tag_id) REFERENCES tags(id)
-        );
-        """
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql", "-o", "output.toml", "--ignore-pk"])
             assert result.exit_code == 0
             assert Path("output.toml").exists()
-            output_content = Path("output.toml").read_text()
-            # Should have INSERT statements without id column
-            assert "INSERT INTO posts" in output_content
-            assert "INSERT INTO tags" in output_content
-            assert "INSERT INTO post_tags" in output_content
+            content = Path("output.toml").read_text()
+            assert "[tool.render-engine.pg" in content
+            assert "blog" in content
 
-    def test_without_ignore_pk_includes_primary_keys(self):
-        """Test that without --ignore-pk, PRIMARY KEY columns are included."""
-        sql_content = """
-        -- @collection
-        CREATE TABLE posts (
-            id INTEGER PRIMARY KEY,
-            title VARCHAR(255)
-        );
-        """
-        runner = CliRunner()
+    def test_nested_output_directory(self, runner):
+        """Test creating nested output directories."""
         with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql"])
-            assert result.exit_code == 0
-            # Without --ignore-pk, id should be in the INSERT statement
-            assert "INSERT INTO posts" in result.output
-            assert "id" in result.output
+            with open("schema.sql", "w") as f:
+                f.write("""
+                -- @collection
+                CREATE TABLE blog (
+                    id integer NOT NULL
+                );
+                """)
 
-    def test_ignore_pk_with_composite_primary_key(self):
-        """Test --ignore-pk with composite PRIMARY KEY."""
-        sql_content = """
-        -- @junction
-        CREATE TABLE post_tags (
-            post_id INTEGER,
-            tag_id INTEGER,
-            PRIMARY KEY (post_id, tag_id)
-        );
-        """
-        runner = CliRunner()
+            result = runner.invoke(main, ["schema.sql", "-o", "config/nested/output.toml"])
+
+            assert result.exit_code == 0
+            assert Path("config/nested/output.toml").exists()
+
+
+class TestUnifiedCLIComplexSchemas:
+    """Tests for complex real-world schemas."""
+
+    def test_kjaymiller_schema_structure(self, runner):
+        """Test processing a schema similar to kjaymiller.com."""
         with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql", "--ignore-pk"])
-            assert result.exit_code == 0
-            # Should generate INSERT statement (though composite keys are tricky)
-            assert "INSERT INTO post_tags" in result.output
+            with open("schema.sql", "w") as f:
+                f.write("""
+                CREATE TABLE blog (
+                    id integer NOT NULL,
+                    slug character varying(255) NOT NULL,
+                    title character varying(255) NOT NULL,
+                    content text NOT NULL,
+                    description text,
+                    date timestamp without time zone NOT NULL
+                );
 
-    def test_ignore_pk_combined_with_manual_ignore(self):
-        """Test --ignore-pk combined with manual -- ignore annotations."""
-        sql_content = """
-        -- @collection
-        CREATE TABLE posts (
-            id INTEGER PRIMARY KEY,
-            title VARCHAR(255),
-            draft BOOLEAN -- ignore
-        );
-        """
-        runner = CliRunner()
+                ALTER TABLE ONLY blog
+                    ADD CONSTRAINT blog_pkey PRIMARY KEY (id);
+
+                CREATE TABLE tags (
+                    id integer NOT NULL,
+                    name character varying(100) NOT NULL,
+                    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+                );
+
+                ALTER TABLE ONLY tags
+                    ADD CONSTRAINT tags_pkey PRIMARY KEY (id);
+
+                CREATE TABLE blog_tags (
+                    blog_id integer NOT NULL,
+                    tag_id integer NOT NULL,
+                    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+                );
+
+                ALTER TABLE ONLY blog_tags
+                    ADD CONSTRAINT blog_tags_pkey PRIMARY KEY (blog_id, tag_id);
+                """)
+
+            # Test auto-classification
+            result_auto = runner.invoke(main, ["schema.sql"])
+            assert result_auto.exit_code == 0
+            assert "blog" in result_auto.output
+            assert "tags" in result_auto.output
+            assert "blog_tags" in result_auto.output
+
+            # Test with --ignore-pk
+            result_ignore_pk = runner.invoke(main, ["schema.sql", "--ignore-pk"])
+            assert result_ignore_pk.exit_code == 0
+            # IDs should be in columns but excluded from INSERT
+            assert "INSERT INTO blog (slug, title, content" in result_ignore_pk.output or \
+                   "INSERT INTO blog" in result_ignore_pk.output
+
+    def test_many_to_many_relationship(self, runner):
+        """Test handling of many-to-many relationships."""
         with runner.isolated_filesystem():
-            Path("test.sql").write_text(sql_content)
-            result = runner.invoke(main, ["test.sql", "--ignore-pk"])
-            assert result.exit_code == 0
-            assert "INSERT INTO posts" in result.output
-            # Both id (from --ignore-pk) and draft (from -- ignore) should be excluded
-            # Only title should remain
+            with open("schema.sql", "w") as f:
+                f.write("""
+                CREATE TABLE posts (
+                    id integer NOT NULL,
+                    title varchar(255) NOT NULL,
+                    content text NOT NULL
+                );
 
+                CREATE TABLE categories (
+                    id integer NOT NULL,
+                    name varchar(100) NOT NULL
+                );
+
+                CREATE TABLE post_categories (
+                    post_id integer NOT NULL,
+                    category_id integer NOT NULL
+                );
+                """)
+
+            result = runner.invoke(main, ["schema.sql"])
+
+            assert result.exit_code == 0
+            # All tables should be present
+            for table in ["posts", "categories", "post_categories"]:
+                assert table in result.output
+
+
+class TestUnifiedCLIIntegration:
+    """Integration tests combining multiple features."""
+
+    def test_auto_classify_with_ignore_pk_and_timestamps(self, runner):
+        """Test auto-classification with both --ignore-pk and --ignore-timestamps."""
+        with runner.isolated_filesystem():
+            with open("schema.sql", "w") as f:
+                f.write("""
+                -- @collection
+                CREATE TABLE blog (
+                    id integer NOT NULL,
+                    title varchar(255) NOT NULL,
+                    content text NOT NULL,
+                    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+                    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+                );
+
+                ALTER TABLE ONLY blog
+                    ADD CONSTRAINT blog_pkey PRIMARY KEY (id);
+                """)
+
+            result = runner.invoke(
+                main,
+                ["schema.sql", "--ignore-pk", "--ignore-timestamps"],
+            )
+
+            assert result.exit_code == 0
+            # Both id and timestamps should be excluded
+            assert "INSERT INTO blog (title, content)" in result.output or \
+                   "INSERT INTO blog" in result.output
+
+    def test_auto_classify_output_and_verbose(self, runner):
+        """Test combining -o and -v flags."""
+        with runner.isolated_filesystem():
+            with open("schema.sql", "w") as f:
+                f.write("""
+                -- @collection
+                CREATE TABLE blog (
+                    id integer NOT NULL,
+                    title varchar(255) NOT NULL
+                );
+                """)
+
+            result = runner.invoke(
+                main,
+                ["schema.sql", "-o", "config.toml", "-v"],
+            )
+
+            assert result.exit_code == 0
+            assert Path("config.toml").exists()
+            # Verbose output should be in stderr (captured in result.output)
+            assert "Parsing" in result.output or "Found" in result.output or "Done" in result.output

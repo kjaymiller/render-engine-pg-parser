@@ -627,3 +627,92 @@ class TestSQLParserIgnorePKFlag:
             if obj["type"] in ["collection", "attribute"]:
                 ignored = obj["attributes"].get("ignored_columns", [])
                 assert "id" in ignored, f"Table {obj['name']} should have 'id' ignored"
+
+    def test_ignore_pk_with_alter_table_syntax(self):
+        """Test --ignore-pk flag with PostgreSQL pg_dump ALTER TABLE syntax."""
+        sql = """
+        -- @collection
+        CREATE TABLE posts (
+            id integer NOT NULL,
+            slug character varying(255) NOT NULL,
+            title character varying(255) NOT NULL,
+            content text NOT NULL
+        );
+
+        ALTER TABLE ONLY posts
+            ADD CONSTRAINT posts_pkey PRIMARY KEY (id);
+
+        -- @attribute
+        CREATE TABLE tags (
+            id integer NOT NULL,
+            name character varying(100) NOT NULL
+        );
+
+        ALTER TABLE ONLY tags
+            ADD CONSTRAINT tags_pkey PRIMARY KEY (id);
+        """
+        parser = SQLParser(ignore_pk=True)
+        objects = parser.parse(sql)
+
+        assert len(objects) == 2
+
+        # Check that 'id' is in ignored_columns for both tables
+        for obj in objects:
+            assert set(obj["columns"]) == {"id", "slug", "title", "content"} if obj["name"] == "posts" else {"id", "name"}
+            ignored = obj["attributes"].get("ignored_columns", [])
+            assert "id" in ignored, f"Table {obj['name']} should have 'id' ignored from ALTER TABLE"
+            # Other columns should not be ignored
+            if obj["name"] == "posts":
+                assert "slug" not in ignored
+                assert "title" not in ignored
+                assert "content" not in ignored
+            else:
+                assert "name" not in ignored
+
+    def test_ignore_pk_with_composite_key_alter_table(self):
+        """Test --ignore-pk with composite PRIMARY KEY in ALTER TABLE syntax."""
+        sql = """
+        -- @junction
+        CREATE TABLE post_tags (
+            post_id integer NOT NULL,
+            tag_id integer NOT NULL,
+            created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+        );
+
+        ALTER TABLE ONLY post_tags
+            ADD CONSTRAINT post_tags_pkey PRIMARY KEY (post_id, tag_id);
+        """
+        parser = SQLParser(ignore_pk=True)
+        objects = parser.parse(sql)
+
+        assert len(objects) == 1
+        obj = objects[0]
+        assert set(obj["columns"]) == {"post_id", "tag_id", "created_at"}
+
+        ignored = obj["attributes"].get("ignored_columns", [])
+        # Both PK columns should be ignored
+        assert "post_id" in ignored
+        assert "tag_id" in ignored
+        # Non-PK column should not be ignored
+        assert "created_at" not in ignored
+
+    def test_ignore_pk_with_schema_qualified_alter_table(self):
+        """Test --ignore-pk with schema-qualified table names in ALTER TABLE."""
+        sql = """
+        -- @collection
+        CREATE TABLE public.blog (
+            id integer NOT NULL,
+            title character varying(255) NOT NULL
+        );
+
+        ALTER TABLE ONLY public.blog
+            ADD CONSTRAINT blog_pkey PRIMARY KEY (id);
+        """
+        parser = SQLParser(ignore_pk=True)
+        objects = parser.parse(sql)
+
+        assert len(objects) == 1
+        obj = objects[0]
+        assert obj["name"] == "blog"
+        ignored = obj["attributes"].get("ignored_columns", [])
+        assert "id" in ignored
