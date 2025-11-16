@@ -139,8 +139,11 @@ class InsertionQueryGenerator:
         # Build INSERT statement
         insert_stmt = f"INSERT INTO {table} ({col_str})\nVALUES ({values_str})"
 
-        # For attributes and junctions, add ON CONFLICT ... DO UPDATE ... RETURNING id
-        if obj_type in ("attribute", "junction") and unique_columns:
+        # For junctions with an id column, always add RETURNING id to fetch the generated ID
+        if obj_type == "junction" and "id" in columns:
+            insert_stmt += " RETURNING id"
+        # For attributes with unique columns, add ON CONFLICT ... DO UPDATE ... RETURNING id
+        elif obj_type == "attribute" and unique_columns:
             # Use the first unique column as conflict target
             unique_col = unique_columns[0]
             insert_stmt += f" ON CONFLICT ({unique_col}) DO UPDATE SET {unique_col} = EXCLUDED.{unique_col} RETURNING id"

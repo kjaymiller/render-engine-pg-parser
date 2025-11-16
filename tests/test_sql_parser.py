@@ -670,7 +670,7 @@ class TestSQLParserIgnorePKFlag:
                 assert "name" not in ignored
 
     def test_ignore_pk_with_composite_key_alter_table(self):
-        """Test --ignore-pk with composite PRIMARY KEY in ALTER TABLE syntax."""
+        """Test --ignore-pk with composite PRIMARY KEY on junction table in ALTER TABLE syntax."""
         sql = """
         -- @junction
         CREATE TABLE post_tags (
@@ -690,10 +690,10 @@ class TestSQLParserIgnorePKFlag:
         assert set(obj["columns"]) == {"post_id", "tag_id", "created_at"}
 
         ignored = obj["attributes"].get("ignored_columns", [])
-        # Both PK columns should be ignored
-        assert "post_id" in ignored
-        assert "tag_id" in ignored
-        # Non-PK column should not be ignored
+        # Junction table PK columns should NOT be ignored - they are foreign keys needed for relationships
+        assert "post_id" not in ignored
+        assert "tag_id" not in ignored
+        # created_at should also not be ignored (it's a timestamp but not explicitly marked as TIMESTAMP type in definition)
         assert "created_at" not in ignored
 
     def test_ignore_pk_with_schema_qualified_alter_table(self):

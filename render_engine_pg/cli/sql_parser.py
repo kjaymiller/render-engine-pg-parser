@@ -143,7 +143,7 @@ class SQLParser:
             parent_name = match.group(1)
             table_name = match.group(2)
             columns_def = match.group(3)
-            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def, table_name)
+            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def, table_name, "page")
 
             obj = {
                 "name": table_name,
@@ -167,7 +167,7 @@ class SQLParser:
             parent_name = match.group(1)  # Optional parent collection name
             table_name = match.group(2)
             columns_def = match.group(3)
-            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def, table_name)
+            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def, table_name, "collection")
 
             # Collection name defaults to table name
             collection_name = table_name
@@ -194,7 +194,7 @@ class SQLParser:
             parent_name = match.group(1)
             table_name = match.group(2)
             columns_def = match.group(3)
-            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def, table_name)
+            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def, table_name, "junction")
 
             obj = {
                 "name": table_name,
@@ -218,7 +218,7 @@ class SQLParser:
             parent_name = match.group(1)
             table_name = match.group(2)
             columns_def = match.group(3)
-            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def, table_name)
+            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def, table_name, "attribute")
 
             obj = {
                 "name": table_name,
@@ -249,7 +249,7 @@ class SQLParser:
             if table_name in processed_tables:
                 continue
 
-            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def, table_name)
+            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def, table_name, "unmarked")
 
             # Add as unmarked table (will be inferred from usage in junctions)
             obj = {
@@ -269,13 +269,14 @@ class SQLParser:
 
         return objects
 
-    def _parse_columns(self, columns_def: str, table_name: str = "") -> tuple:
+    def _parse_columns(self, columns_def: str, table_name: str = "", table_type: str = "") -> tuple:
         """
         Extract column names from column definitions.
 
         Args:
             columns_def: The column definitions string from CREATE TABLE
             table_name: The table name (used to look up PRIMARY KEY columns from ALTER TABLE statements)
+            table_type: The type of table ('page', 'collection', 'attribute', 'junction', 'unmarked')
 
         Returns:
             Tuple of (columns, ignored_columns, aggregate_columns, unique_columns) where:
@@ -330,12 +331,16 @@ class SQLParser:
                         # Check if column should be ignored
                         should_ignore = has_ignore
 
+                        # Junction table PRIMARY KEY columns should NOT be ignored
+                        # because they are the foreign keys needed to maintain relationships
+                        is_junction = table_type == "junction"
+
                         # Check for PRIMARY KEY (inline in column definition)
-                        if self.ignore_pk and 'PRIMARY KEY' in line_stripped.upper():
+                        if self.ignore_pk and not is_junction and 'PRIMARY KEY' in line_stripped.upper():
                             should_ignore = True
 
                         # Check for PRIMARY KEY (from ALTER TABLE statement)
-                        if self.ignore_pk and col_name in pk_columns:
+                        if self.ignore_pk and not is_junction and col_name in pk_columns:
                             should_ignore = True
 
                         # Check for TIMESTAMP

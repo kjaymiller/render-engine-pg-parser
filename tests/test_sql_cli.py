@@ -170,7 +170,7 @@ class TestUnifiedCLIIgnorePKFlag:
             assert "INSERT INTO blog" in result_with.output
 
     def test_ignore_pk_composite_key(self, runner):
-        """Test --ignore-pk with composite PRIMARY KEY."""
+        """Test --ignore-pk with composite PRIMARY KEY on junction table."""
         with runner.isolated_filesystem():
             with open("schema.sql", "w") as f:
                 f.write("""
@@ -188,9 +188,10 @@ class TestUnifiedCLIIgnorePKFlag:
             result = runner.invoke(main, ["schema.sql", "--ignore-pk"])
 
             assert result.exit_code == 0
-            # Both PK columns should be excluded
-            assert "(created_at)" in result.output
-            assert "blog_id" not in result.output or "INSERT INTO blog_tags (created_at)" in result.output
+            # Junction PK columns should NOT be excluded - they are foreign keys needed for relationships
+            assert "blog_id, tag_id, created_at" in result.output or "blog_id,tag_id,created_at" in result.output.replace(" ", "")
+            # created_at should be excluded (it's not a PK or FK, and --ignore-pk should affect non-junction tables)
+            assert "INSERT INTO blog_tags" in result.output
 
     def test_ignore_pk_multiple_tables(self, runner):
         """Test --ignore-pk across multiple tables with relationships."""
