@@ -110,43 +110,80 @@ class InsertionQueryGenerator:
         # Generate comment
         query_parts = [f"-- Insert {obj['type'].capitalize()}: {obj['name']}"]
 
-        # Build column list and placeholder values
-        col_str = ", ".join(columns_to_insert)
+        # Special handling for junction tables: map FK columns to referenced object IDs
+        if obj_type == "junction":
+            # Build FK column mappings by finding relationships where this junction is referenced
+            fk_mappings = {}
 
-        # Generate values using {key} placeholders for t-string interpolation (Python 3.14+)
-        values = []
-        for col in columns_to_insert:
-            # Check if this column is a foreign key
-            is_fk = any(
-                rel["column"] == col and rel["source"] == obj["name"]
-                for rel in relationships
-            )
+            for rel in relationships:
+                metadata = rel.get("metadata", {})
+                if metadata.get("junction_table") == obj["name"]:
+                    # This relationship involves our junction table
+                    source_fk = metadata.get("source_fk_column")
+                    source_obj = rel.get("source")
 
-            if is_fk:
-                # Use {key} reference placeholder for FK
-                rel = next(
-                    r
-                    for r in relationships
-                    if r["column"] == col and r["source"] == obj["name"]
+                    if source_fk and source_obj:
+                        fk_mappings[source_fk] = source_obj
+
+            col_str = ", ".join(columns_to_insert)
+            values = []
+            for col in columns_to_insert:
+                if col in fk_mappings:
+                    # This is a FK column - use the object ID placeholder
+                    values.append(f"{{{fk_mappings[col]}_id}}")
+                else:
+                    # Regular column (like created_at) - use column name placeholder
+                    values.append(f"{{{col}}}")
+            values_str = ", ".join(values)
+        else:
+            # Non-junction handling: check for regular foreign keys
+            col_str = ", ".join(columns_to_insert)
+
+            # Generate values using {key} placeholders for t-string interpolation (Python 3.14+)
+            values = []
+            for col in columns_to_insert:
+                # Check if this column is a foreign key
+                is_fk = any(
+                    rel["column"] == col and rel["source"] == obj["name"]
+                    for rel in relationships
                 )
-                values.append(f"{{{rel['target']}_id}}")
-            else:
-                # Use {key} placeholder for t-string interpolation
-                values.append(f"{{{col}}}")
 
-        values_str = ", ".join(values)
+                if is_fk:
+                    # Use {key} reference placeholder for FK
+                    rel = next(
+                        r
+                        for r in relationships
+                        if r["column"] == col and r["source"] == obj["name"]
+                    )
+                    values.append(f"{{{rel['target']}_id}}")
+                else:
+                    # Use {key} placeholder for t-string interpolation
+                    values.append(f"{{{col}}}")
+
+            values_str = ", ".join(values)
 
         # Build INSERT statement
         insert_stmt = f"INSERT INTO {table} ({col_str})\nVALUES ({values_str})"
 
-        # For junctions with an id column, always add RETURNING id to fetch the generated ID
+        # Add RETURNING clauses for ID retrieval in dependent queries
+        should_return_id = False
+
         if obj_type == "junction" and "id" in columns:
-            insert_stmt += " RETURNING id"
-        # For attributes with unique columns, add ON CONFLICT ... DO UPDATE ... RETURNING id
+            # Junctions with an id column should RETURNING id
+            should_return_id = True
         elif obj_type == "attribute" and unique_columns:
-            # Use the first unique column as conflict target
+            # Attributes with unique columns use ON CONFLICT ... RETURNING id
             unique_col = unique_columns[0]
+            insert_stmt = insert_stmt.replace("\n", " ")  # Flatten before inserting conflict clause
             insert_stmt += f" ON CONFLICT ({unique_col}) DO UPDATE SET {unique_col} = EXCLUDED.{unique_col} RETURNING id"
+            insert_stmt = insert_stmt.replace("INSERT INTO", "\nINSERT INTO")  # Re-format
+        elif "id" in columns_to_insert:
+            # Any table with an id column being inserted should return it (for junction references and dependent queries)
+            # This includes pages, collections, attributes, and unmarked tables
+            should_return_id = True
+
+        if should_return_id and obj_type != "attribute":  # Don't double-add for attributes
+            insert_stmt += " RETURNING id"
 
         insert_stmt += ";"
 
