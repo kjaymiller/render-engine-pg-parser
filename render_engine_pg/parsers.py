@@ -87,6 +87,49 @@ class PGPageParser(BasePageParser):
 
 class PGMarkdownCollectionParser(MarkdownPageParser):
     @staticmethod
+    def _convert_template_to_parameterized(
+        template: str,
+        data: dict[str, Any],
+    ) -> tuple[str, list[Any]]:
+        """
+        Convert a {placeholder} template to a parameterized query with %s placeholders.
+
+        Args:
+            template: SQL template string with {key} placeholders
+            data: Dictionary of values to substitute
+
+        Returns:
+            Tuple of (parameterized_query, values_list)
+
+        Example:
+            template = "INSERT INTO tags (name, created_at) VALUES ({name}, {created_at})"
+            data = {name: 'python', created_at: '2025-11-17T15:48:19'}
+
+            Returns:
+            ("INSERT INTO tags (name, created_at) VALUES (%s, %s)", ['python', '2025-11-17T15:48:19'])
+        """
+        import string
+
+        formatter = string.Formatter()
+        field_names = [field_name for _, field_name, _, _ in formatter.parse(template) if field_name]
+
+        # Check if all required fields are available
+        for field in field_names:
+            if field not in data:
+                raise KeyError(field)
+
+        # Build parameterized query by replacing {key} with %s
+        # and collecting values in order of appearance
+        param_query = template
+        values = []
+        for _, field_name, _, _ in formatter.parse(template):
+            if field_name:
+                param_query = param_query.replace(f"{{{field_name}}}", "%s", 1)
+                values.append(data[field_name])
+
+        return param_query, values
+
+    @staticmethod
     def _try_execute_with_list_iteration(
         cursor: Any,
         template: str,
@@ -99,7 +142,7 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
         When a template references a missing field (e.g., {name}), this method:
         1. Searches for any list fields in frontmatter
         2. For each list field, checks if using its items for the missing field makes the template work
-        3. If found, executes the template once for each item in the list
+        3. If found, executes the template once for each item in the list using parameterized queries
 
         Args:
             cursor: Database cursor to execute queries
@@ -117,9 +160,9 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
 
             This method will:
             1. Find that "tags" is a list
-            2. Execute template twice:
-               - INSERT INTO tags (name) VALUES ('python')
-               - INSERT INTO tags (name) VALUES ('postgresql')
+            2. Execute template twice with parameterized queries:
+               - INSERT INTO tags (name) VALUES (%s)  [with 'python']
+               - INSERT INTO tags (name) VALUES (%s)  [with 'postgresql']
         """
         # Find all list fields in frontmatter
         list_fields = {k: v for k, v in frontmatter_data.items() if isinstance(v, list)}
@@ -135,19 +178,21 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
                 # Empty list - skip
                 continue
 
-            # Create a mapping where the missing field uses the list field's name
-            # For example: tags list -> use items as {name} values
+            # For each item in the list, execute the template using parameterized queries
             for item in list_items:
                 # Create a copy of frontmatter data with the missing field filled from list item
                 test_data = {**frontmatter_data, missing_field: item}
 
                 try:
-                    # Test if this mapping works
-                    formatted_query = template.format_map(test_data)
-                    logger.debug(
-                        f"Executing insert_sql template with list iteration (field='{list_field_name}', item='{item}'): {formatted_query}"
+                    # Convert template to parameterized query
+                    param_query, values = PGMarkdownCollectionParser._convert_template_to_parameterized(
+                        template, test_data
                     )
-                    cursor.execute(formatted_query)
+
+                    logger.debug(
+                        f"Executing insert_sql template with list iteration (field='{list_field_name}', item='{item}'): {param_query} with values {values}"
+                    )
+                    cursor.execute(param_query, values)
                 except KeyError:
                     # This list field doesn't help - try the next one
                     continue
@@ -262,9 +307,12 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
                     for insert_sql_template in insert_sql_list:
                         # Try to execute template with current frontmatter data
                         try:
-                            formatted_query = insert_sql_template.format_map(frontmatter_data)
-                            logger.debug(f"Executing insert_sql template: {formatted_query}")
-                            cur.execute(formatted_query)
+                            # Convert template to parameterized query for safe value substitution
+                            param_query, values = PGMarkdownCollectionParser._convert_template_to_parameterized(
+                                insert_sql_template, frontmatter_data
+                            )
+                            logger.debug(f"Executing insert_sql template: {param_query} with values {values}")
+                            cur.execute(param_query, values)
                         except KeyError as e:
                             # Template has missing field - check if we can iterate through a list
                             missing_field = e.args[0]

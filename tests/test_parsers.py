@@ -328,14 +328,16 @@ class TestPGMarkdownCollectionParserListIteration:
         # Should have called execute twice - once for each tag
         assert mock_cursor.execute.call_count == 2
 
-        # Check the calls made
+        # Check the calls made - should use parameterized queries
         calls = mock_cursor.execute.call_args_list
-        first_call = str(calls[0])
-        second_call = str(calls[1])
+        first_call = calls[0]
+        second_call = calls[1]
 
-        # Both calls should have been made with the tag names
-        assert "INSERT INTO tags (name) VALUES (python)" in first_call
-        assert "INSERT INTO tags (name) VALUES (databases)" in second_call
+        # Both calls should have been made with the parameterized query and tag values
+        assert first_call[0][0] == "INSERT INTO tags (name) VALUES (%s)"
+        assert first_call[0][1] == ["python"]
+        assert second_call[0][0] == "INSERT INTO tags (name) VALUES (%s)"
+        assert second_call[0][1] == ["databases"]
 
     def test_try_execute_with_list_iteration_multiple_list_fields(self, mocker):
         """Test behavior when multiple list fields exist."""
@@ -431,10 +433,11 @@ class TestPGMarkdownCollectionParserListIteration:
 
         # Check that the call includes both the tag name and other preserved fields
         calls = mock_cursor.execute.call_args_list
-        call_str = str(calls[0])
-        assert "python" in call_str
-        assert "42" in call_str
-        assert "2024-01-01" in call_str
+        call = calls[0]
+
+        # Should be parameterized query with all values in order
+        assert call[0][0] == "INSERT INTO tags (tag_name, post_id, created_at) VALUES (%s, %s, %s)"
+        assert call[0][1] == ["python", 42, "2024-01-01"]
 
     def test_try_execute_with_list_iteration_stops_at_first_matching_list(self):
         """Test that iteration stops after finding the first working list."""
