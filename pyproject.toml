@@ -23,7 +23,7 @@ test = ["pytest>=7.0", "pytest-mock>=3.10", "mypy>=1.0"]
 include = ["render_engine_pg"]
 
 [project.scripts]
-render-engine-pg = "render_engine_pg.cli.sql_cli:main"
+render-engine-pg = "render_engine_pg.cli.cli:cli"
 
 [tool.setuptools_scm]
 local_scheme = "no-local-version"

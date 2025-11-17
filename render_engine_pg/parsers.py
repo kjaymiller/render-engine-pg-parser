@@ -1,6 +1,7 @@
 import frontmatter
 import re
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 from psycopg.rows import dict_row
 from render_engine_parser import BasePageParser
@@ -250,3 +251,114 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
             return str(result)
 
         return str(insert_query)
+
+
+class PGFilePopulationParser(PGMarkdownCollectionParser):
+    """
+    Internal parser for populating database from markdown files.
+
+    Not exposed as public API. Used by CLI for batch file-based database population.
+    Handles filepath-based metadata extraction (slug from filename) and calls
+    create_entry() for database insertion.
+    """
+
+    @staticmethod
+    def populate_from_file(
+        file_path: str | Path,
+        connection: Any,
+        collection_name: str,
+        table: str,
+        extract_slug_from_filename: bool = True,
+        **extra_metadata: Any
+    ) -> str:
+        """
+        Read a markdown file, extract metadata, and populate database.
+
+        Args:
+            file_path: Path to markdown file
+            connection: PostgreSQL connection object
+            collection_name: Collection name (for loading insert_sql templates)
+            table: Database table name for main INSERT
+            extract_slug_from_filename: If True, derives slug from filename (stem)
+            **extra_metadata: Additional metadata to merge with frontmatter
+
+        Returns:
+            SQL query string that was executed
+        """
+        file_path = Path(file_path)
+
+        # Read file content
+        content = file_path.read_text()
+
+        # Parse frontmatter to get existing metadata
+        post = frontmatter.loads(content)
+
+        # Extract slug from filename if needed and not already in frontmatter
+        if extract_slug_from_filename and "slug" not in post.metadata:
+            # Use file stem (filename without extension) as slug
+            slug = file_path.stem
+
+            # Clean up common date prefixes (e.g., "2020-01-15-my-post" -> "my-post")
+            # This pattern matches YYYY-MM-DD- or YYYY-MM- prefixes
+            slug = re.sub(r'^\d{4}-\d{2}-\d{2}-', '', slug)
+            slug = re.sub(r'^\d{4}-\d{2}-', '', slug)
+
+            post.metadata["slug"] = slug
+
+        # Merge any additional metadata passed as kwargs
+        for key, value in extra_metadata.items():
+            if key not in post.metadata:
+                post.metadata[key] = value
+
+        # Reconstruct content with updated frontmatter
+        updated_content = frontmatter.dumps(post)
+
+        # Call parent's create_entry with enriched metadata
+        return PGMarkdownCollectionParser.create_entry(
+            content=updated_content,
+            connection=connection,
+            collection_name=collection_name,
+            table=table
+        )
+
+    @staticmethod
+    def populate_from_directory(
+        directory: str | Path,
+        connection: Any,
+        collection_name: str,
+        table: str,
+        pattern: str = "*.md",
+        extract_slug_from_filename: bool = True,
+        **shared_metadata: Any
+    ) -> list[str]:
+        """
+        Populate database from all markdown files in a directory.
+
+        Args:
+            directory: Path to directory containing markdown files
+            connection: PostgreSQL connection object
+            collection_name: Collection name (for loading insert_sql templates)
+            table: Database table name
+            pattern: Glob pattern for matching files (default: "*.md")
+            extract_slug_from_filename: If True, derives slug from filename
+            **shared_metadata: Metadata to apply to all files
+
+        Returns:
+            List of SQL query strings that were executed
+        """
+        directory = Path(directory)
+        results = []
+
+        for file_path in sorted(directory.glob(pattern)):
+            if file_path.is_file():
+                result = PGFilePopulationParser.populate_from_file(
+                    file_path=file_path,
+                    connection=connection,
+                    collection_name=collection_name,
+                    table=table,
+                    extract_slug_from_filename=extract_slug_from_filename,
+                    **shared_metadata
+                )
+                results.append(result)
+
+        return results
