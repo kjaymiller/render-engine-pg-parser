@@ -1,5 +1,6 @@
 import frontmatter
 import re
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,8 @@ from render_engine_markdown import MarkdownPageParser
 from render_engine_pg import PostgresQuery
 from render_engine_pg.re_settings_parser import PGSettings
 from psycopg import sql
+
+logger = logging.getLogger(__name__)
 
 
 class PGPageParser(BasePageParser):
@@ -189,13 +192,15 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
                         # Skip templates with missing required fields - they will be handled elsewhere
                         try:
                             formatted_query = insert_sql_template.format_map(frontmatter_data)
+                            logger.debug(f"Executing insert_sql template: {formatted_query}")
                             cur.execute(formatted_query)
                         except KeyError as e:
                             # Skip this template if required fields are missing
                             # This allows markdown files with partial frontmatter to still work
                             missing_field = e.args[0]
-                            # Silently skip - log if needed for debugging
-                            pass
+                            logger.debug(
+                                f"Skipping insert_sql template due to missing field '{missing_field}': {insert_sql_template}"
+                            )
                 connection.commit()
 
         # Extract allowed columns from read_sql configuration for the main content INSERT

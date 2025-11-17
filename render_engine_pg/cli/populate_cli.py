@@ -8,6 +8,7 @@ from pyproject.toml.
 
 import os
 import sys
+import logging
 from pathlib import Path
 
 import click
@@ -16,12 +17,18 @@ from render_engine_pg.connection import get_db_connection
 from render_engine_pg.parsers import PGFilePopulationParser
 from .cli_common import handle_cli_error, create_option_verbose
 
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(name)s - %(levelname)s - %(message)s'
+)
+
 
 @click.command()
 @click.argument("table_name")
 @click.argument("content_path", type=click.Path(exists=True, path_type=Path))
 @create_option_verbose()
-def main(table_name: str, content_path: Path, verbose: bool):
+def main(table_name: str, content_path: Path, verbose: bool) -> None:
     """
     Populate a PostgreSQL database table from markdown files.
 
@@ -47,6 +54,25 @@ def main(table_name: str, content_path: Path, verbose: bool):
             click.echo(f"Connecting to database...", err=True)
             click.echo(f"Parsing markdown files from {content_path}...", err=True)
 
+        # Load settings to show what will be executed
+        from render_engine_pg.re_settings_parser import PGSettings
+        settings = PGSettings()
+        insert_sql = settings.get_insert_sql(table_name)
+        read_sql = settings.get_read_sql(table_name)
+
+        if verbose:
+            if insert_sql:
+                click.echo(f"Found {len(insert_sql)} insert_sql templates for '{table_name}'", err=True)
+                for i, template in enumerate(insert_sql, 1):
+                    click.echo(f"  Template {i}: {template[:80]}...", err=True)
+            else:
+                click.echo(f"⚠ No insert_sql templates found for '{table_name}'", err=True)
+
+            if read_sql:
+                click.echo(f"Found read_sql for '{table_name}'", err=True)
+            else:
+                click.echo(f"⚠ No read_sql found for '{table_name}'", err=True)
+
         # Find all markdown files
         md_files = sorted(list(content_path.glob("*.md")))
         click.echo(f"Found {len(md_files)} markdown files")
@@ -64,6 +90,9 @@ def main(table_name: str, content_path: Path, verbose: bool):
 
         for md_file in md_files:
             try:
+                if verbose:
+                    click.echo(f"Processing {md_file.name}...", err=True)
+
                 PGFilePopulationParser.populate_from_file(
                     file_path=md_file,
                     connection=conn,
