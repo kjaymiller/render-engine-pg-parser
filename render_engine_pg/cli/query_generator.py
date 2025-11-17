@@ -106,14 +106,7 @@ class InsertionQueryGenerator:
         unique_columns = obj.get("attributes", {}).get("unique_columns", [])
         obj_type = obj.get("type", "").lower()
 
-        # Filter out ignored columns
-        columns_to_insert = [col for col in columns if col not in ignored_columns]
-
-        # Generate comment
-        query_parts = [f"-- Insert {obj['type'].capitalize()}: {obj['name']}"]
-
         # Detect if this is a junction table (explicit or implicit)
-        # Implicit junctions: unmarked tables with only FK columns (except timestamps/created_at)
         is_junction = obj_type == "junction"
         if not is_junction and obj_type == "unmarked" and all_objects:
             fk_cols = []
@@ -123,6 +116,36 @@ class InsertionQueryGenerator:
                     fk_cols.append(col)
             # If table has 2+ FK columns and mostly FK columns, treat as junction
             is_junction = len(fk_cols) >= 2 and len(fk_cols) >= len(columns) - 2
+
+        # Filter out ignored columns, but PRESERVE foreign key columns in junction tables
+        # because they're essential for maintaining relationships
+        if is_junction:
+            # For junction tables, never ignore FK columns even if they're PKs
+            fk_columns = set()
+
+            # Find FK columns from many_to_many_attribute relationships
+            # These relationships have the FK column info in metadata
+            for rel in relationships:
+                metadata = rel.get("metadata", {})
+                if metadata.get("junction_table") == obj["name"]:
+                    # This relationship involves our junction table
+                    source_fk = metadata.get("source_fk_column")
+                    target_fk = metadata.get("target_fk_column")
+                    if source_fk:
+                        fk_columns.add(source_fk)
+                    if target_fk:
+                        fk_columns.add(target_fk)
+
+            columns_to_insert = [
+                col for col in columns
+                if col not in ignored_columns or col in fk_columns
+            ]
+        else:
+            # For non-junction tables, filter out ignored columns normally
+            columns_to_insert = [col for col in columns if col not in ignored_columns]
+
+        # Generate comment
+        query_parts = [f"-- Insert {obj['type'].capitalize()}: {obj['name']}"]
 
         # Special handling for junction tables: use subqueries to look up FK IDs
         if is_junction and all_objects:
