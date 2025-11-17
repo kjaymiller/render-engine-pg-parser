@@ -160,7 +160,10 @@ class InsertionQueryGenerator:
                 if metadata.get("junction_table") == obj["name"]:
                     source_fk = metadata.get("source_fk_column")
                     source_obj = rel.get("source")
+                    target_fk = metadata.get("target_fk_column")
+                    target_obj = rel.get("target")
 
+                    # Handle source FK lookup
                     if source_fk and source_obj:
                         # Find the object definition to get unique columns
                         obj_def = next((o for o in all_objects if o["name"] == source_obj), None)
@@ -180,6 +183,30 @@ class InsertionQueryGenerator:
                             if lookup_col:
                                 fk_info[source_fk] = {
                                     "target_obj": source_obj,
+                                    "lookup_col": lookup_col,
+                                    "table": obj_def["table"],
+                                }
+
+                    # Handle target FK lookup (for many_to_many_attribute relationships)
+                    if target_fk and target_obj:
+                        # Find the object definition to get unique columns
+                        obj_def = next((o for o in all_objects if o["name"] == target_obj), None)
+                        if obj_def:
+                            # For attributes, prefer unique columns, then name
+                            unique_cols = obj_def.get("attributes", {}).get("unique_columns", [])
+                            lookup_col = None
+                            if unique_cols and unique_cols[0] != "id":
+                                lookup_col = unique_cols[0]
+                            elif "name" in obj_def["columns"]:
+                                lookup_col = "name"
+                            elif "slug" in obj_def["columns"]:
+                                lookup_col = "slug"
+                            elif unique_cols:
+                                lookup_col = unique_cols[0]
+
+                            if lookup_col:
+                                fk_info[target_fk] = {
+                                    "target_obj": target_obj,
                                     "lookup_col": lookup_col,
                                     "table": obj_def["table"],
                                 }
@@ -275,18 +302,23 @@ class InsertionQueryGenerator:
         if obj_type == "junction" and "id" in columns:
             # Junctions with an id column should RETURNING id
             should_return_id = True
-        elif obj_type == "attribute" and unique_columns:
-            # Attributes with unique columns use ON CONFLICT ... RETURNING id
-            unique_col = unique_columns[0]
-            insert_stmt = insert_stmt.replace("\n", " ")  # Flatten before inserting conflict clause
-            insert_stmt += f" ON CONFLICT ({unique_col}) DO UPDATE SET {unique_col} = EXCLUDED.{unique_col} RETURNING id"
-            insert_stmt = insert_stmt.replace("INSERT INTO", "\nINSERT INTO")  # Re-format
+        elif obj_type == "attribute":
+            # Attributes always need to RETURN id for dependent queries
+            if unique_columns:
+                # Attributes with unique columns use ON CONFLICT ... RETURNING id
+                unique_col = unique_columns[0]
+                insert_stmt = insert_stmt.replace("\n", " ")  # Flatten before inserting conflict clause
+                insert_stmt += f" ON CONFLICT ({unique_col}) DO UPDATE SET {unique_col} = EXCLUDED.{unique_col} RETURNING id"
+                insert_stmt = insert_stmt.replace("INSERT INTO", "\nINSERT INTO")  # Re-format
+            elif "id" in columns_to_insert:
+                # Attributes without unique constraints still need to RETURN id
+                should_return_id = True
         elif "id" in columns_to_insert:
             # Any table with an id column being inserted should return it (for junction references and dependent queries)
-            # This includes pages, collections, attributes, and unmarked tables
+            # This includes pages, collections, and unmarked tables
             should_return_id = True
 
-        if should_return_id and obj_type != "attribute":  # Don't double-add for attributes
+        if should_return_id:
             insert_stmt += " RETURNING id"
 
         insert_stmt += ";"

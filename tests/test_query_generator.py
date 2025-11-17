@@ -765,3 +765,184 @@ class TestIgnoredColumnsFiltering:
         # Should still generate a query (though it would be invalid SQL)
         # The important thing is it doesn't error
         assert len(queries) == 1
+
+
+class TestAttributeExistenceHandling:
+    """Tests for handling attributes that already exist in the database."""
+
+    def test_attribute_on_conflict_with_unique_constraint(self):
+        """Test that attributes with UNIQUE constraints generate ON CONFLICT clauses."""
+        objects = [
+            {
+                "name": "tags",
+                "type": "attribute",
+                "table": "tags",
+                "columns": ["id", "name"],
+                "attributes": {
+                    "unique_columns": ["name"]
+                },
+            }
+        ]
+        relationships = []
+
+        generator = InsertionQueryGenerator()
+        ordered_objects, queries = generator.generate(objects, relationships)
+
+        # Should have ON CONFLICT for idempotent inserts
+        assert len(queries) == 1
+        query = queries[0]
+        assert "ON CONFLICT (name) DO UPDATE SET" in query
+        assert "RETURNING id" in query
+
+    def test_junction_lookup_matches_incoming_data_field(self):
+        """Test that junction table FK lookups use correct column names."""
+        objects = [
+            {
+                "name": "tags",
+                "type": "attribute",
+                "table": "tags",
+                "columns": ["id", "name"],
+                "attributes": {
+                    "unique_columns": ["name"]
+                },
+            },
+            {
+                "name": "posts",
+                "type": "page",
+                "table": "posts",
+                "columns": ["id", "title", "slug"],
+                "attributes": {
+                    "unique_columns": ["slug"]
+                },
+            },
+            {
+                "name": "post_tags",
+                "type": "junction",
+                "table": "post_tags",
+                "columns": ["post_id", "tag_id"],
+                "attributes": {},
+            },
+        ]
+        relationships = [
+            {
+                "source": "posts",
+                "target": "tags",
+                "type": "many_to_many_attribute",
+                "column": "post_id",
+                "metadata": {
+                    "junction_table": "post_tags",
+                    "source_fk_column": "post_id",
+                    "target_fk_column": "tag_id",
+                    "source_type": "page",
+                    "target_type": "attribute"
+                },
+            }
+        ]
+
+        generator = InsertionQueryGenerator()
+        ordered_objects, queries = generator.generate(objects, relationships)
+
+        # Find the post_tags insertion query
+        post_tags_query = next(q for q in queries if "post_tags" in q)
+
+        # The lookup for tag_id should use 'name' since tags use name as unique identifier
+        # The lookup should be: (SELECT id FROM tags WHERE name = {name})
+        assert "(SELECT id FROM tags WHERE name = {name})" in post_tags_query
+        # Verify post_id lookup uses slug since posts have slug as unique identifier
+        assert "(SELECT id FROM posts WHERE slug = {slug})" in post_tags_query
+
+    def test_repeated_tag_insertion_idempotent(self):
+        """Test that inserting the same tag twice doesn't fail."""
+        objects = [
+            {
+                "name": "tags",
+                "type": "attribute",
+                "table": "tags",
+                "columns": ["id", "name"],
+                "attributes": {
+                    "unique_columns": ["name"]
+                },
+            }
+        ]
+        relationships = []
+
+        generator = InsertionQueryGenerator()
+        ordered_objects, queries = generator.generate(objects, relationships)
+
+        query = queries[0]
+        # ON CONFLICT clause enables idempotent inserts
+        assert "ON CONFLICT (name)" in query
+        assert "DO UPDATE SET" in query
+
+    def test_attribute_without_unique_constraint_no_conflict(self):
+        """Test that attributes without UNIQUE constraints don't get ON CONFLICT."""
+        objects = [
+            {
+                "name": "categories",
+                "type": "attribute",
+                "table": "categories",
+                "columns": ["id", "name"],
+                "attributes": {},
+            }
+        ]
+        relationships = []
+
+        generator = InsertionQueryGenerator()
+        ordered_objects, queries = generator.generate(objects, relationships)
+
+        query = queries[0]
+        # Without unique constraints, no ON CONFLICT
+        assert "ON CONFLICT" not in query
+        # But should still RETURN id for dependent queries
+        assert "RETURNING id" in query
+
+    def test_junction_with_existing_attribute_lookup(self):
+        """Test junction insert uses correct lookup column for existing attributes."""
+        objects = [
+            {
+                "name": "tags",
+                "type": "attribute",
+                "table": "tags",
+                "columns": ["id", "slug", "name"],
+                "attributes": {
+                    "unique_columns": ["slug"]  # slug is the unique identifier
+                },
+            },
+            {
+                "name": "posts",
+                "type": "page",
+                "table": "posts",
+                "columns": ["id", "title"],
+                "attributes": {},
+            },
+            {
+                "name": "post_tags",
+                "type": "junction",
+                "table": "post_tags",
+                "columns": ["post_id", "tag_id"],
+                "attributes": {},
+            },
+        ]
+        relationships = [
+            {
+                "source": "posts",
+                "target": "tags",
+                "type": "many_to_many_attribute",
+                "column": "post_id",
+                "metadata": {
+                    "junction_table": "post_tags",
+                    "source_fk_column": "post_id",
+                    "target_fk_column": "tag_id",
+                    "source_type": "page",
+                    "target_type": "attribute"
+                },
+            }
+        ]
+
+        generator = InsertionQueryGenerator()
+        ordered_objects, queries = generator.generate(objects, relationships)
+
+        post_tags_query = next(q for q in queries if "post_tags" in q)
+
+        # Should use slug since it's the unique column for tags
+        assert "(SELECT id FROM tags WHERE slug = {slug})" in post_tags_query

@@ -304,8 +304,11 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
                     frontmatter_data["updated_at"] = datetime.now().isoformat()
 
                 with connection.cursor() as cur:
-                    for insert_sql_template in insert_sql_list:
-                        # Try to execute template with current frontmatter data
+                    for i, insert_sql_template in enumerate(insert_sql_list):
+                        # Create a savepoint for each template so we can rollback individual failures
+                        savepoint_name = f"sp_insert_{i}"
+                        cur.execute(f"SAVEPOINT {savepoint_name}")
+
                         try:
                             # Convert template to parameterized query for safe value substitution
                             param_query, values = PGMarkdownCollectionParser._convert_template_to_parameterized(
@@ -314,17 +317,45 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
                             logger.debug(f"Executing insert_sql template: {param_query} with values {values}")
                             cur.execute(param_query, values)
                         except KeyError as e:
+                            # Rollback this specific query
+                            cur.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")
+
                             # Template has missing field - check if we can iterate through a list
                             missing_field = e.args[0]
-                            list_field_used = PGMarkdownCollectionParser._try_execute_with_list_iteration(
-                                cur, insert_sql_template, frontmatter_data, missing_field
-                            )
 
-                            if not list_field_used:
-                                # No list available for iteration - skip this template
+                            # Create another savepoint for list iteration attempt
+                            cur.execute(f"SAVEPOINT {savepoint_name}_list")
+                            try:
+                                list_field_used = PGMarkdownCollectionParser._try_execute_with_list_iteration(
+                                    cur, insert_sql_template, frontmatter_data, missing_field
+                                )
+                                if list_field_used:
+                                    # List iteration succeeded, release the savepoint
+                                    cur.execute(f"RELEASE SAVEPOINT {savepoint_name}_list")
+                                else:
+                                    # No list available for iteration - skip this template
+                                    cur.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}_list")
+                                    logger.debug(
+                                        f"Skipping insert_sql template due to missing field '{missing_field}': {insert_sql_template}"
+                                    )
+                            except Exception:
+                                # List iteration also failed
+                                cur.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}_list")
                                 logger.debug(
                                     f"Skipping insert_sql template due to missing field '{missing_field}': {insert_sql_template}"
                                 )
+                        except Exception as db_error:
+                            # Handle database errors like unique constraint violations
+                            # These can occur when inserting attributes that already exist
+                            cur.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")
+                            logger.debug(
+                                f"Skipping insert_sql template due to database error: {db_error}\n"
+                                f"Template: {insert_sql_template}"
+                            )
+                        else:
+                            # Query executed successfully, release the savepoint
+                            cur.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+
                 connection.commit()
 
         # Extract allowed columns from read_sql configuration for the main content INSERT

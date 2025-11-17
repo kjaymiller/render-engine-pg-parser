@@ -506,3 +506,5 @@ Post body."""
         # Plus the main INSERT for posts
         assert mock_cursor.execute.call_count >= 3  # At least 2 tags + 1 posts + 1 main
 
+
+
