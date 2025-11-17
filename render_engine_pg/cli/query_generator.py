@@ -30,7 +30,7 @@ class InsertionQueryGenerator:
         ordered_objects = self._order_by_dependencies(objects, relationships)
 
         for obj in ordered_objects:
-            query = self._generate_object_query(obj, relationships)
+            query = self._generate_object_query(obj, relationships, objects)
             if query:
                 queries.append(query)
 
@@ -87,6 +87,7 @@ class InsertionQueryGenerator:
         self,
         obj: Dict[str, Any],
         relationships: List[Dict[str, Any]],
+        all_objects: List[Dict[str, Any]] | None = None,
     ) -> str:
         """
         Generate an insertion query for a single object.
@@ -94,6 +95,7 @@ class InsertionQueryGenerator:
         Args:
             obj: Object to generate query for
             relationships: List of all relationships
+            all_objects: List of all objects (for junction table lookup)
 
         Returns:
             SQL insertion query string
@@ -110,31 +112,110 @@ class InsertionQueryGenerator:
         # Generate comment
         query_parts = [f"-- Insert {obj['type'].capitalize()}: {obj['name']}"]
 
-        # Special handling for junction tables: map FK columns to referenced object IDs
-        if obj_type == "junction":
-            # Build FK column mappings by finding relationships where this junction is referenced
-            fk_mappings = {}
+        # Detect if this is a junction table (explicit or implicit)
+        # Implicit junctions: unmarked tables with only FK columns (except timestamps/created_at)
+        is_junction = obj_type == "junction"
+        if not is_junction and obj_type == "unmarked" and all_objects:
+            fk_cols = []
+            for col in columns:
+                is_fk = any(rel["column"] == col and rel["source"] == obj["name"] for rel in relationships)
+                if is_fk:
+                    fk_cols.append(col)
+            # If table has 2+ FK columns and mostly FK columns, treat as junction
+            is_junction = len(fk_cols) >= 2 and len(fk_cols) >= len(columns) - 2
 
+        # Special handling for junction tables: use subqueries to look up FK IDs
+        if is_junction and all_objects:
+            # Build FK column mappings and find unique lookup columns
+            fk_info = {}  # column -> {target_obj, lookup_column}
+
+            # Handle both explicit junctions (with metadata) and implicit junctions (detected from structure)
             for rel in relationships:
                 metadata = rel.get("metadata", {})
+
+                # For explicit junctions (marked as @junction)
                 if metadata.get("junction_table") == obj["name"]:
-                    # This relationship involves our junction table
                     source_fk = metadata.get("source_fk_column")
                     source_obj = rel.get("source")
 
                     if source_fk and source_obj:
-                        fk_mappings[source_fk] = source_obj
+                        # Find the object definition to get unique columns
+                        obj_def = next((o for o in all_objects if o["name"] == source_obj), None)
+                        if obj_def:
+                            # Prefer slug for collections/pages, name for attributes/tags
+                            unique_cols = obj_def.get("attributes", {}).get("unique_columns", [])
+                            lookup_col = None
+                            if "slug" in obj_def["columns"]:
+                                lookup_col = "slug"
+                            elif unique_cols and unique_cols[0] != "id":
+                                lookup_col = unique_cols[0]
+                            elif "name" in obj_def["columns"]:
+                                lookup_col = "name"
+                            elif unique_cols:
+                                lookup_col = unique_cols[0]
 
+                            if lookup_col:
+                                fk_info[source_fk] = {
+                                    "target_obj": source_obj,
+                                    "lookup_col": lookup_col,
+                                    "table": obj_def["table"],
+                                }
+
+                # For implicit junctions (unmarked tables with FK columns)
+                elif rel["source"] == obj["name"] and rel["type"] == "foreign_key":
+                    fk_col = rel["column"]
+                    target_obj = rel["target"]
+
+                    # Find the object definition
+                    obj_def = next((o for o in all_objects if o["name"] == target_obj), None)
+                    if obj_def:
+                        # Prefer slug for collections/pages, name for attributes/tags
+                        unique_cols = obj_def.get("attributes", {}).get("unique_columns", [])
+                        lookup_col = None
+                        if "slug" in obj_def["columns"]:
+                            lookup_col = "slug"
+                        elif unique_cols and unique_cols[0] != "id":
+                            lookup_col = unique_cols[0]
+                        elif "name" in obj_def["columns"]:
+                            lookup_col = "name"
+                        elif unique_cols:
+                            lookup_col = unique_cols[0]
+
+                        if lookup_col:
+                            fk_info[fk_col] = {
+                                "target_obj": target_obj,
+                                "lookup_col": lookup_col,
+                                "table": obj_def["table"],
+                            }
+
+            # Generate the junction insert using subqueries for FK lookups
             col_str = ", ".join(columns_to_insert)
-            values = []
+
+            # Build SELECT clause with subqueries for FK columns
+            select_parts = []
             for col in columns_to_insert:
-                if col in fk_mappings:
-                    # This is a FK column - use the object ID placeholder
-                    values.append(f"{{{fk_mappings[col]}_id}}")
+                if col in fk_info:
+                    info = fk_info[col]
+                    target_table = info["table"]
+                    lookup_col = info["lookup_col"]
+                    # Use subquery to look up ID using the unique identifier
+                    select_parts.append(f"(SELECT id FROM {target_table} WHERE {lookup_col} = {{{lookup_col}}})")
                 else:
-                    # Regular column (like created_at) - use column name placeholder
-                    values.append(f"{{{col}}}")
-            values_str = ", ".join(values)
+                    # Regular column (like created_at) - use placeholder
+                    select_parts.append(f"{{{col}}}")
+
+            select_str = ", ".join(select_parts)
+
+            # Use INSERT INTO ... SELECT for flexibility with subqueries
+            insert_stmt = f"INSERT INTO {table} ({col_str})\nSELECT {select_str}"
+
+            # Add RETURNING id if junction has an id column
+            if "id" in columns:
+                insert_stmt += " RETURNING id"
+
+            insert_stmt += ";"
+
+            return "\n".join([f"-- Insert {obj['type'].capitalize()}: {obj['name']}", insert_stmt])
         else:
             # Non-junction handling: check for regular foreign keys
             col_str = ", ".join(columns_to_insert)
