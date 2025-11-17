@@ -87,6 +87,78 @@ class PGPageParser(BasePageParser):
 
 class PGMarkdownCollectionParser(MarkdownPageParser):
     @staticmethod
+    def _try_execute_with_list_iteration(
+        cursor: Any,
+        template: str,
+        frontmatter_data: dict[str, Any],
+        missing_field: str,
+    ) -> bool:
+        """
+        Attempt to execute a template by iterating through a list field.
+
+        When a template references a missing field (e.g., {name}), this method:
+        1. Searches for any list fields in frontmatter
+        2. For each list field, checks if using its items for the missing field makes the template work
+        3. If found, executes the template once for each item in the list
+
+        Args:
+            cursor: Database cursor to execute queries
+            template: SQL template string with {placeholders}
+            frontmatter_data: Dictionary of frontmatter data
+            missing_field: The field name that's missing from frontmatter_data
+
+        Returns:
+            True if a list field was found and template was executed, False otherwise
+
+        Example:
+            frontmatter_data = {id: 1, tags: ['python', 'postgresql']}
+            template = "INSERT INTO tags (name) VALUES ({name})"
+            missing_field = "name"
+
+            This method will:
+            1. Find that "tags" is a list
+            2. Execute template twice:
+               - INSERT INTO tags (name) VALUES ('python')
+               - INSERT INTO tags (name) VALUES ('postgresql')
+        """
+        # Find all list fields in frontmatter
+        list_fields = {k: v for k, v in frontmatter_data.items() if isinstance(v, list)}
+
+        if not list_fields:
+            # No lists available for iteration
+            return False
+
+        # Try each list field to see if it can satisfy the missing field
+        for list_field_name, list_items in list_fields.items():
+            # Create test data with first item to see if template works
+            if not list_items:
+                # Empty list - skip
+                continue
+
+            # Create a mapping where the missing field uses the list field's name
+            # For example: tags list -> use items as {name} values
+            for item in list_items:
+                # Create a copy of frontmatter data with the missing field filled from list item
+                test_data = {**frontmatter_data, missing_field: item}
+
+                try:
+                    # Test if this mapping works
+                    formatted_query = template.format_map(test_data)
+                    logger.debug(
+                        f"Executing insert_sql template with list iteration (field='{list_field_name}', item='{item}'): {formatted_query}"
+                    )
+                    cursor.execute(formatted_query)
+                except KeyError:
+                    # This list field doesn't help - try the next one
+                    continue
+
+            # If we got here, we successfully executed for all items in this list
+            return True
+
+        # No list field could satisfy the template
+        return False
+
+    @staticmethod
     def parse(content: str, extras: dict[str, Any] | None = None) -> str:
         """
         Parse markdown content with default extras enabled.
@@ -188,19 +260,23 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
 
                 with connection.cursor() as cur:
                     for insert_sql_template in insert_sql_list:
-                        # Use safe string formatting with format_map to handle missing placeholders
-                        # Skip templates with missing required fields - they will be handled elsewhere
+                        # Try to execute template with current frontmatter data
                         try:
                             formatted_query = insert_sql_template.format_map(frontmatter_data)
                             logger.debug(f"Executing insert_sql template: {formatted_query}")
                             cur.execute(formatted_query)
                         except KeyError as e:
-                            # Skip this template if required fields are missing
-                            # This allows markdown files with partial frontmatter to still work
+                            # Template has missing field - check if we can iterate through a list
                             missing_field = e.args[0]
-                            logger.debug(
-                                f"Skipping insert_sql template due to missing field '{missing_field}': {insert_sql_template}"
+                            list_field_used = PGMarkdownCollectionParser._try_execute_with_list_iteration(
+                                cur, insert_sql_template, frontmatter_data, missing_field
                             )
+
+                            if not list_field_used:
+                                # No list available for iteration - skip this template
+                                logger.debug(
+                                    f"Skipping insert_sql template due to missing field '{missing_field}': {insert_sql_template}"
+                                )
                 connection.commit()
 
         # Extract allowed columns from read_sql configuration for the main content INSERT

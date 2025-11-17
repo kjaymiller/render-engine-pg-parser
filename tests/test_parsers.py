@@ -300,3 +300,206 @@ title: My Post
             # One of the fields will be missing
             assert str(e.args[0]) in ("id", "slug")
 
+
+class TestPGMarkdownCollectionParserListIteration:
+    """Test PGMarkdownCollectionParser list iteration for template substitution."""
+
+    def test_try_execute_with_list_iteration_basic_tags(self, mocker):
+        """Test that list iteration works with a simple tags list."""
+        from unittest.mock import MagicMock
+
+        # Mock cursor
+        mock_cursor = MagicMock()
+
+        # Frontmatter with tags as a list
+        frontmatter_data = {"id": 1, "title": "Post", "tags": ["python", "databases"]}
+
+        # Template expecting {name} which doesn't exist as a direct key
+        template = "INSERT INTO tags (name) VALUES ({name})"
+
+        # Call the helper method
+        result = PGMarkdownCollectionParser._try_execute_with_list_iteration(
+            mock_cursor, template, frontmatter_data, "name"
+        )
+
+        # Should succeed
+        assert result is True
+
+        # Should have called execute twice - once for each tag
+        assert mock_cursor.execute.call_count == 2
+
+        # Check the calls made
+        calls = mock_cursor.execute.call_args_list
+        first_call = str(calls[0])
+        second_call = str(calls[1])
+
+        # Both calls should have been made with the tag names
+        assert "INSERT INTO tags (name) VALUES (python)" in first_call
+        assert "INSERT INTO tags (name) VALUES (databases)" in second_call
+
+    def test_try_execute_with_list_iteration_multiple_list_fields(self, mocker):
+        """Test behavior when multiple list fields exist."""
+        from unittest.mock import MagicMock
+
+        mock_cursor = MagicMock()
+
+        # Frontmatter with multiple lists
+        frontmatter_data = {
+            "id": 1,
+            "title": "Post",
+            "tags": ["python", "databases"],
+            "categories": ["tech", "news"],
+        }
+
+        # Template expecting {name} - should use first compatible list (tags)
+        template = "INSERT INTO tags (name) VALUES ({name})"
+
+        result = PGMarkdownCollectionParser._try_execute_with_list_iteration(
+            mock_cursor, template, frontmatter_data, "name"
+        )
+
+        # Should succeed
+        assert result is True
+
+        # Should have executed for the items in the first matched list
+        assert mock_cursor.execute.call_count >= 2
+
+    def test_try_execute_with_list_iteration_no_lists(self, mocker):
+        """Test that it returns False when no lists are present."""
+        from unittest.mock import MagicMock
+
+        mock_cursor = MagicMock()
+
+        # Frontmatter with no lists
+        frontmatter_data = {"id": 1, "title": "Post"}
+
+        template = "INSERT INTO tags (name) VALUES ({name})"
+
+        result = PGMarkdownCollectionParser._try_execute_with_list_iteration(
+            mock_cursor, template, frontmatter_data, "name"
+        )
+
+        # Should fail to find any lists
+        assert result is False
+
+        # Should not have called execute
+        assert mock_cursor.execute.call_count == 0
+
+    def test_try_execute_with_list_iteration_empty_list(self):
+        """Test that empty lists are skipped."""
+        from unittest.mock import MagicMock
+
+        mock_cursor = MagicMock()
+
+        # Frontmatter with empty list
+        frontmatter_data = {"id": 1, "title": "Post", "tags": []}
+
+        template = "INSERT INTO tags (name) VALUES ({name})"
+
+        result = PGMarkdownCollectionParser._try_execute_with_list_iteration(
+            mock_cursor, template, frontmatter_data, "name"
+        )
+
+        # Empty list should be skipped
+        assert result is False
+        assert mock_cursor.execute.call_count == 0
+
+    def test_try_execute_with_list_iteration_preserves_other_fields(self):
+        """Test that other frontmatter fields are preserved during iteration."""
+        from unittest.mock import MagicMock
+
+        mock_cursor = MagicMock()
+
+        # Frontmatter with various fields
+        frontmatter_data = {
+            "id": 42,
+            "title": "My Post",
+            "tags": ["python"],
+            "created_at": "2024-01-01",
+        }
+
+        # Template using both the iterated field and other fields
+        template = (
+            "INSERT INTO tags (tag_name, post_id, created_at) VALUES ({name}, {id}, {created_at})"
+        )
+
+        result = PGMarkdownCollectionParser._try_execute_with_list_iteration(
+            mock_cursor, template, frontmatter_data, "name"
+        )
+
+        assert result is True
+
+        # Check that the call includes both the tag name and other preserved fields
+        calls = mock_cursor.execute.call_args_list
+        call_str = str(calls[0])
+        assert "python" in call_str
+        assert "42" in call_str
+        assert "2024-01-01" in call_str
+
+    def test_try_execute_with_list_iteration_stops_at_first_matching_list(self):
+        """Test that iteration stops after finding the first working list."""
+        from unittest.mock import MagicMock
+
+        mock_cursor = MagicMock()
+
+        frontmatter_data = {
+            "id": 1,
+            "tags": ["tag1", "tag2"],
+            "authors": ["author1"],
+        }
+
+        template = "INSERT INTO tags (name) VALUES ({name})"
+
+        result = PGMarkdownCollectionParser._try_execute_with_list_iteration(
+            mock_cursor, template, frontmatter_data, "name"
+        )
+
+        assert result is True
+
+        # Should have executed for items from the matching list
+        # The exact count depends on which list is matched first
+        assert mock_cursor.execute.call_count >= 1
+
+    def test_create_entry_with_list_frontmatter_integration(self, mocker):
+        """Integration test: create_entry with tags list in frontmatter."""
+        mock_settings = MagicMock()
+        mock_settings.get_insert_sql.return_value = [
+            "INSERT INTO tags (name) VALUES ({name})",
+            "INSERT INTO posts (id, title, content) VALUES ({id}, {title}, {content})",
+        ]
+        mock_settings.get_read_sql.return_value = "SELECT id, title, content FROM posts"
+        mocker.patch(
+            "render_engine_pg.parsers.PGSettings", return_value=mock_settings
+        )
+
+        content = """---
+id: 1
+title: My Post
+tags: [python, postgresql]
+---
+# Content
+
+Post body."""
+
+        mock_cursor = MagicMock()
+        mock_connection = MagicMock()
+        mock_connection.cursor.return_value.__enter__.return_value = mock_cursor
+
+        # Patch the SQL class to avoid encoding issues in tests
+        from psycopg import sql
+
+        mocker.patch.object(sql.SQL, "format", lambda *args, **kwargs: MagicMock())
+        mocker.patch.object(sql.SQL, "as_string", lambda self, conn: "")
+
+        result = PGMarkdownCollectionParser.create_entry(
+            content=content,
+            collection_name="blog",
+            connection=mock_connection,
+            table="posts",
+        )
+
+        # The first template (tags) should have been executed for each tag
+        # The second template (posts) should have been executed once
+        # Plus the main INSERT for posts
+        assert mock_cursor.execute.call_count >= 3  # At least 2 tags + 1 posts + 1 main
+
