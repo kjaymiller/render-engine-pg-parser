@@ -34,6 +34,7 @@ class SQLParser:
         """
         self.ignore_pk = ignore_pk
         self.ignore_timestamps = ignore_timestamps
+        self.primary_key_columns: Dict[str, set[str]] = {}  # Maps table names to their PK columns
 
     # Pattern for page definitions (handles schema-qualified names like public.table_name)
     # Syntax: -- @page [parent_name]
@@ -75,6 +76,35 @@ class SQLParser:
     # Pattern for comments
     COMMENT_PATTERN = re.compile(r"--\s*@(\w+)\s*(.+?)(?:\n|$)")
 
+    # Pattern for ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY
+    # Matches: ALTER TABLE [ONLY] [schema.]table ADD CONSTRAINT constraint_name PRIMARY KEY (col1, col2, ...);
+    ALTER_TABLE_PK_PATTERN = re.compile(
+        r"ALTER\s+TABLE\s+(?:ONLY\s+)?(?:\w+\.)?(\w+)\s+ADD\s+CONSTRAINT\s+\w+\s+PRIMARY\s+KEY\s*\(([^)]+)\)",
+        re.IGNORECASE | re.DOTALL,
+    )
+
+    def _extract_primary_keys(self, sql_content: str) -> None:
+        """
+        Extract PRIMARY KEY columns from ALTER TABLE statements.
+
+        This handles PostgreSQL dumps where PK constraints are defined separately
+        via ALTER TABLE statements rather than inline in column definitions.
+
+        Populates self.primary_key_columns with a mapping of table names to sets of PK column names.
+        """
+        for match in self.ALTER_TABLE_PK_PATTERN.finditer(sql_content):
+            table_name = match.group(1)
+            pk_columns_str = match.group(2)
+
+            # Parse the column list (handle both "col1, col2" and "col1,col2")
+            pk_columns = set()
+            for col in pk_columns_str.split(','):
+                col = col.strip()
+                if col:
+                    pk_columns.add(col)
+
+            self.primary_key_columns[table_name] = pk_columns
+
     def parse(self, sql_content: str) -> List[Dict[str, Any]]:
         """
         Parse SQL content and extract render-engine objects.
@@ -103,6 +133,9 @@ class SQLParser:
                 }
             }
         """
+        # Extract PRIMARY KEY columns from ALTER TABLE statements first
+        self._extract_primary_keys(sql_content)
+
         objects = []
 
         # Find all pages
@@ -110,7 +143,7 @@ class SQLParser:
             parent_name = match.group(1)
             table_name = match.group(2)
             columns_def = match.group(3)
-            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def)
+            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def, table_name, "page")
 
             obj = {
                 "name": table_name,
@@ -134,7 +167,7 @@ class SQLParser:
             parent_name = match.group(1)  # Optional parent collection name
             table_name = match.group(2)
             columns_def = match.group(3)
-            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def)
+            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def, table_name, "collection")
 
             # Collection name defaults to table name
             collection_name = table_name
@@ -161,7 +194,7 @@ class SQLParser:
             parent_name = match.group(1)
             table_name = match.group(2)
             columns_def = match.group(3)
-            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def)
+            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def, table_name, "junction")
 
             obj = {
                 "name": table_name,
@@ -185,7 +218,7 @@ class SQLParser:
             parent_name = match.group(1)
             table_name = match.group(2)
             columns_def = match.group(3)
-            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def)
+            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def, table_name, "attribute")
 
             obj = {
                 "name": table_name,
@@ -216,7 +249,7 @@ class SQLParser:
             if table_name in processed_tables:
                 continue
 
-            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def)
+            columns, ignored_columns, aggregate_columns, unique_columns = self._parse_columns(columns_def, table_name, "unmarked")
 
             # Add as unmarked table (will be inferred from usage in junctions)
             obj = {
@@ -236,9 +269,14 @@ class SQLParser:
 
         return objects
 
-    def _parse_columns(self, columns_def: str) -> tuple:
+    def _parse_columns(self, columns_def: str, table_name: str = "", table_type: str = "") -> tuple:
         """
         Extract column names from column definitions.
+
+        Args:
+            columns_def: The column definitions string from CREATE TABLE
+            table_name: The table name (used to look up PRIMARY KEY columns from ALTER TABLE statements)
+            table_type: The type of table ('page', 'collection', 'attribute', 'junction', 'unmarked')
 
         Returns:
             Tuple of (columns, ignored_columns, aggregate_columns, unique_columns) where:
@@ -251,6 +289,9 @@ class SQLParser:
         ignored_columns = []
         aggregate_columns = []
         unique_columns = []
+
+        # Get PRIMARY KEY columns for this table (from ALTER TABLE statements)
+        pk_columns = self.primary_key_columns.get(table_name, set())
 
         # Split by lines to parse each column definition
         # This handles -- ignore and @aggregate comments that appear on the same line as the column
@@ -290,8 +331,16 @@ class SQLParser:
                         # Check if column should be ignored
                         should_ignore = has_ignore
 
-                        # Check for PRIMARY KEY
-                        if self.ignore_pk and 'PRIMARY KEY' in line_stripped.upper():
+                        # Junction table PRIMARY KEY columns should NOT be ignored
+                        # because they are the foreign keys needed to maintain relationships
+                        is_junction = table_type == "junction"
+
+                        # Check for PRIMARY KEY (inline in column definition)
+                        if self.ignore_pk and not is_junction and 'PRIMARY KEY' in line_stripped.upper():
+                            should_ignore = True
+
+                        # Check for PRIMARY KEY (from ALTER TABLE statement)
+                        if self.ignore_pk and not is_junction and col_name in pk_columns:
                             should_ignore = True
 
                         # Check for TIMESTAMP
