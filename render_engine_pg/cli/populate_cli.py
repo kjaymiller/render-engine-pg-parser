@@ -17,12 +17,6 @@ from render_engine_pg.connection import get_db_connection
 from render_engine_pg.parsers import PGFilePopulationParser
 from .cli_common import handle_cli_error, create_option_verbose
 
-# Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(name)s - %(levelname)s - %(message)s'
-)
-
 
 @click.command()
 @click.argument("table_name")
@@ -39,6 +33,13 @@ def main(table_name: str, content_path: Path, verbose: bool) -> None:
     TABLE_NAME: The database table name (e.g., blog, notes, microblog)
     CONTENT_PATH: Path to directory containing markdown files
     """
+    # Configure logging based on verbose flag
+    log_level = logging.DEBUG if verbose else logging.WARNING
+    logging.basicConfig(
+        level=log_level,
+        format='%(name)s - %(levelname)s - %(message)s'
+    )
+
     try:
         # Get database connection from environment variable
         conn_string = os.environ.get("CONNECTION_STRING")
