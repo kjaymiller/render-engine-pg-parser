@@ -135,7 +135,7 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
         connection: Any,
         templates: list[str],
         frontmatter_data: dict[str, Any],
-    ) -> None:
+    ) -> list[str]:
         """
         Execute template queries in proper order with error handling.
 
@@ -401,7 +401,7 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
         # Execute pre-configured insert SQL templates from settings if collection_name is provided
         # Templates have access to FULL frontmatter data (including tags, categories, etc.)
         # Execution order: pre-main templates (attributes) → main INSERT → post-main templates (junctions)
-        post_main_templates = []
+        post_main_templates: list[str] = []
 
         if collection_name:
             settings = PGSettings()
