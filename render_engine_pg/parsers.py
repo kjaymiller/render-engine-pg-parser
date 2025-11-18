@@ -130,6 +130,114 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
         return param_query, values
 
     @staticmethod
+    def _execute_templates_in_order(
+        cursor: Any,
+        connection: Any,
+        templates: list[str],
+        frontmatter_data: dict[str, Any],
+    ) -> None:
+        """
+        Execute template queries in proper order with error handling.
+
+        Separates templates into:
+        - Pre-main: Simple INSERTs (attributes, tags)
+        - Post-main: JunctionINSERTs with subqueries (execute after main INSERT)
+
+        Args:
+            cursor: Database cursor
+            connection: Database connection
+            templates: List of SQL templates to execute
+            frontmatter_data: Frontmatter data for template substitution
+        """
+        pre_main = []  # Simple INSERTs
+        post_main = []  # Junction INSERTs with subqueries
+
+        # Separate templates by type
+        for tmpl in templates:
+            # Junction tables have INSERT ... SELECT subqueries
+            if "SELECT" in tmpl.upper() and "FROM" in tmpl.upper():
+                post_main.append(tmpl)
+            else:
+                pre_main.append(tmpl)
+
+        # Execute pre-main templates
+        PGMarkdownCollectionParser._execute_template_list(
+            cursor, pre_main, frontmatter_data, "pre-main"
+        )
+
+        # Note: Main INSERT happens between pre-main and post-main in create_entry()
+        # Return post-main templates to execute after main INSERT
+        return post_main
+
+    @staticmethod
+    def _execute_template_list(
+        cursor: Any,
+        templates: list[str],
+        frontmatter_data: dict[str, Any],
+        phase: str = "template",
+    ) -> None:
+        """
+        Execute a list of templates with savepoint-based error handling.
+
+        Args:
+            cursor: Database cursor
+            templates: List of SQL templates to execute
+            frontmatter_data: Frontmatter data for template substitution
+            phase: Phase name for logging (e.g., "pre-main", "post-main")
+        """
+        for i, insert_sql_template in enumerate(templates):
+            # Create a savepoint for each template so we can rollback individual failures
+            savepoint_name = f"sp_{phase}_{i}"
+            cursor.execute(f"SAVEPOINT {savepoint_name}")
+
+            try:
+                # Convert template to parameterized query for safe value substitution
+                param_query, values = PGMarkdownCollectionParser._convert_template_to_parameterized(
+                    insert_sql_template, frontmatter_data
+                )
+                logger.debug(f"Executing {phase} template: {param_query} with values {values}")
+                cursor.execute(param_query, values)
+            except KeyError as e:
+                # Rollback this specific query
+                cursor.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")
+
+                # Template has missing field - check if we can iterate through a list
+                missing_field = e.args[0]
+
+                # Create another savepoint for list iteration attempt
+                cursor.execute(f"SAVEPOINT {savepoint_name}_list")
+                try:
+                    list_field_used = PGMarkdownCollectionParser._try_execute_with_list_iteration(
+                        cursor, insert_sql_template, frontmatter_data, missing_field
+                    )
+                    if list_field_used:
+                        # List iteration succeeded, release the savepoint
+                        cursor.execute(f"RELEASE SAVEPOINT {savepoint_name}_list")
+                    else:
+                        # No list available for iteration - skip this template
+                        cursor.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}_list")
+                        logger.debug(
+                            f"Skipping {phase} template due to missing field '{missing_field}': {insert_sql_template}"
+                        )
+                except Exception:
+                    # List iteration also failed
+                    cursor.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}_list")
+                    logger.debug(
+                        f"Skipping {phase} template due to missing field '{missing_field}': {insert_sql_template}"
+                    )
+            except Exception as db_error:
+                # Handle database errors like unique constraint violations
+                # These can occur when inserting attributes that already exist
+                cursor.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")
+                logger.warning(
+                    f"Skipping {phase} template due to database error: {db_error}\n"
+                    f"Template: {insert_sql_template}"
+                )
+            else:
+                # Query executed successfully, release the savepoint
+                cursor.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+
+    @staticmethod
     def _try_execute_with_list_iteration(
         cursor: Any,
         template: str,
@@ -290,6 +398,9 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
 
         # Execute pre-configured insert SQL templates from settings if collection_name is provided
         # Templates have access to FULL frontmatter data (including tags, categories, etc.)
+        # Execution order: pre-main templates (attributes) → main INSERT → post-main templates (junctions)
+        post_main_templates = []
+
         if collection_name:
             settings = PGSettings()
             insert_sql_list = settings.get_insert_sql(collection_name)
@@ -309,57 +420,10 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
                     connection.autocommit = False
 
                     with connection.cursor() as cur:
-                        for i, insert_sql_template in enumerate(insert_sql_list):
-                            # Create a savepoint for each template so we can rollback individual failures
-                            savepoint_name = f"sp_insert_{i}"
-                            cur.execute(f"SAVEPOINT {savepoint_name}")
-
-                            try:
-                                # Convert template to parameterized query for safe value substitution
-                                param_query, values = PGMarkdownCollectionParser._convert_template_to_parameterized(
-                                    insert_sql_template, frontmatter_data
-                                )
-                                logger.debug(f"Executing insert_sql template: {param_query} with values {values}")
-                                cur.execute(param_query, values)
-                            except KeyError as e:
-                                # Rollback this specific query
-                                cur.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")
-
-                                # Template has missing field - check if we can iterate through a list
-                                missing_field = e.args[0]
-
-                                # Create another savepoint for list iteration attempt
-                                cur.execute(f"SAVEPOINT {savepoint_name}_list")
-                                try:
-                                    list_field_used = PGMarkdownCollectionParser._try_execute_with_list_iteration(
-                                        cur, insert_sql_template, frontmatter_data, missing_field
-                                    )
-                                    if list_field_used:
-                                        # List iteration succeeded, release the savepoint
-                                        cur.execute(f"RELEASE SAVEPOINT {savepoint_name}_list")
-                                    else:
-                                        # No list available for iteration - skip this template
-                                        cur.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}_list")
-                                        logger.debug(
-                                            f"Skipping insert_sql template due to missing field '{missing_field}': {insert_sql_template}"
-                                        )
-                                except Exception:
-                                    # List iteration also failed
-                                    cur.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}_list")
-                                    logger.debug(
-                                        f"Skipping insert_sql template due to missing field '{missing_field}': {insert_sql_template}"
-                                    )
-                            except Exception as db_error:
-                                # Handle database errors like unique constraint violations
-                                # These can occur when inserting attributes that already exist
-                                cur.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")
-                                logger.debug(
-                                    f"Skipping insert_sql template due to database error: {db_error}\n"
-                                    f"Template: {insert_sql_template}"
-                                )
-                            else:
-                                # Query executed successfully, release the savepoint
-                                cur.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+                        # Execute pre-main templates and get post-main templates for later
+                        post_main_templates = PGMarkdownCollectionParser._execute_templates_in_order(
+                            cur, connection, insert_sql_list, frontmatter_data
+                        )
 
                     connection.commit()
                 finally:
@@ -409,11 +473,26 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
             sql.SQL(", ").join(sql.Placeholder() * len(values)),
         )
 
-        # Execute the query
+        # Execute the main INSERT query
         if connection:
-            with connection.cursor() as cur:
-                cur.execute(insert_query, values)
+            # Disable autocommit for transaction management
+            original_autocommit = connection.autocommit
+            try:
+                connection.autocommit = False
+
+                with connection.cursor() as cur:
+                    cur.execute(insert_query, values)
+
+                    # Execute post-main templates (junction tables) after main INSERT
+                    if post_main_templates:
+                        PGMarkdownCollectionParser._execute_template_list(
+                            cur, post_main_templates, frontmatter_data, "post-main"
+                        )
+
                 connection.commit()
+            finally:
+                # Restore original autocommit setting
+                connection.autocommit = original_autocommit
 
             result = insert_query.as_string(connection)
             return str(result)
