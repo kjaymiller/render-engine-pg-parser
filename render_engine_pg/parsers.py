@@ -187,7 +187,9 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
         """
         for i, insert_sql_template in enumerate(templates):
             # Create a savepoint for each template so we can rollback individual failures
-            savepoint_name = f"sp_{phase}_{i}"
+            # Replace hyphens with underscores since PostgreSQL savepoint names can't contain hyphens
+            phase_safe = phase.replace("-", "_")
+            savepoint_name = f"sp_{phase_safe}_{i}"
             cursor.execute(f"SAVEPOINT {savepoint_name}")
 
             try:
