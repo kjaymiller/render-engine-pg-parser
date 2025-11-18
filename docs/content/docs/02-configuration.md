@@ -115,6 +115,30 @@ The CLI tool:
 4. Filters out ignored columns (PRIMARY KEY, TIMESTAMP columns marked with `-- ignore`)
 5. Groups all related inserts under the collection name
 
+#### CLI Flags for Automatic Column Ignoring
+
+Instead of manually adding `-- ignore` comments, use CLI flags:
+
+**Ignore PRIMARY KEY columns:**
+```bash
+render-engine-pg sql schema.sql --ignore-pk -o config.toml
+```
+
+**Ignore TIMESTAMP columns:**
+```bash
+render-engine-pg sql schema.sql --ignore-timestamps -o config.toml
+```
+
+**Ignore both:**
+```bash
+render-engine-pg sql schema.sql --ignore-pk --ignore-timestamps -o config.toml
+```
+
+These flags automatically exclude matching columns from INSERT statements while keeping them available in SELECT (read_sql) queries. This is useful because:
+- PRIMARY KEY columns auto-increment (SERIAL)
+- TIMESTAMP columns auto-generate (DEFAULT NOW())
+- You still want these values in read_sql for your templates
+
 #### Manually Editing insert_sql
 
 After generation, you can edit the queries if needed:

@@ -374,6 +374,181 @@ for collection in collections:
 - **psycopg**: 3.0+
 - **render-engine**: 2025.10.2a1+
 
+## AutoClassifier Class
+
+Automatically classifies database tables as pages, collections, attributes, or junctions based on schema analysis.
+
+### Constructor
+
+```python
+AutoClassifier()
+```
+
+No parameters needed for basic usage.
+
+### Methods
+
+#### `classify(obj, relationships, verbose=False) -> ClassificationResult`
+
+Automatically classify a database object using intelligent heuristics.
+
+**Parameters:**
+
+- `obj` (dict): Object dictionary with keys: `name`, `type`, `columns`, `attributes`
+- `relationships` (list[dict]): List of relationship dictionaries from RelationshipAnalyzer
+- `verbose` (bool): If True, include detailed reasoning in result
+
+**Returns:**
+
+- `ClassificationResult`: Contains `object_type`, `confidence` (0.0-1.0), and optional `reasoning`
+
+**Example:**
+
+```python
+from render_engine_pg.cli.auto_classifier import AutoClassifier, ObjectType
+
+classifier = AutoClassifier()
+
+result = classifier.classify(
+    obj={
+        "name": "blog",
+        "type": "unmarked",
+        "columns": ["id", "slug", "title", "content", "created_at"],
+        "attributes": {}
+    },
+    relationships=[...],
+    verbose=True
+)
+
+if result.object_type == ObjectType.COLLECTION:
+    print(f"Classified as {result.object_type.value} with {result.confidence:.0%} confidence")
+```
+
+### Classification Heuristics
+
+The classifier uses multiple signals to determine object type:
+
+- **Junction Tables**: 2+ foreign key columns, few total columns (2-4)
+- **Attribute/Lookup Tables**: Few columns (2-3), referenced by multiple tables
+- **Collections**: Has content columns (title, description, etc.), standalone
+- **Pages**: Has content columns, foreign key to another table
+
+### ObjectType Enum
+
+```python
+from render_engine_pg.cli.auto_classifier import ObjectType
+
+ObjectType.PAGE       # Single page
+ObjectType.COLLECTION # Multiple content items
+ObjectType.ATTRIBUTE  # Lookup/reference table
+ObjectType.JUNCTION   # Many-to-many relationship table
+```
+
+### ClassificationResult Dataclass
+
+```python
+@dataclass
+class ClassificationResult:
+    object_type: ObjectType        # The classification
+    confidence: float              # 0.0 to 1.0
+    suggested_parent: Optional[str]  # For pages
+    reasoning: str                 # Detailed explanation if verbose=True
+```
+
+## Populate Command API
+
+The `render-engine-pg populate` command populates a PostgreSQL database from markdown files.
+
+### Command Signature
+
+```bash
+render-engine-pg populate <table_name> <content_path> [-v] [--verbose]
+```
+
+### Arguments
+
+- `table_name` (str): Target database table name (e.g., "blog", "notes", "docs")
+- `content_path` (Path): Directory containing markdown files to process
+
+### Options
+
+- `-v, --verbose`: Show detailed processing information
+
+### Environment Variables
+
+**Required:**
+
+- `CONNECTION_STRING`: PostgreSQL connection string in format:
+  ```
+  postgresql://user:password@host:port/database
+  ```
+
+### Markdown File Format
+
+Files should have YAML frontmatter with metadata:
+
+```markdown
+---
+title: Article Title
+author: Author Name
+tags: [tag1, tag2]
+category: Technology
+---
+
+# Article Content
+
+Your markdown content here...
+```
+
+### How It Works
+
+1. Loads pre-configured `insert_sql` templates from `pyproject.toml[tool.render-engine.pg.insert_sql]`
+2. For each markdown file:
+   - Extracts YAML frontmatter
+   - Derives slug from filename
+   - Executes `insert_sql` templates with data from frontmatter
+   - Inserts markdown content into specified table
+3. Reports success/failure for each file
+
+### Example Usage
+
+```bash
+# Set database connection
+export CONNECTION_STRING="postgresql://user:password@localhost:5432/myblog"
+
+# Populate from markdown files
+render-engine-pg populate blog content/blog/
+
+# With verbose output
+render-engine-pg populate blog content/blog/ -v
+```
+
+### Integration with PGMarkdownCollectionParser
+
+The populate command internally uses `PGFilePopulationParser.populate_from_file()` which:
+
+1. Reads markdown file with YAML frontmatter
+2. Executes pre-configured inserts from `pyproject.toml`
+3. Inserts markdown entry into database
+4. Returns count of successful insertions
+
+### Configuration Example
+
+In `pyproject.toml`:
+
+```toml
+[tool.render-engine.pg.insert_sql]
+blog = [
+    "INSERT INTO tags (name) VALUES ({tag}) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id;",
+    "INSERT INTO blog (slug, title, content, author) VALUES ({slug}, {title}, {content}, {author});"
+]
+```
+
+When running `render-engine-pg populate blog content/blog/`:
+- `{slug}` is derived from filename (e.g., `my-post.md` → `my-post`)
+- `{title}`, `{author}`, `{tag}` come from frontmatter
+- `{content}` is the markdown body
+
 ## Advanced: Direct Entry Creation with PGMarkdownCollectionParser
 
 For advanced use cases where you need to programmatically insert markdown entries into a database (not the typical render-engine workflow), `PGMarkdownCollectionParser` provides direct entry creation.

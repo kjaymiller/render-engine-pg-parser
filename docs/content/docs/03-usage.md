@@ -43,10 +43,10 @@ CREATE TABLE IF NOT EXISTS blog_tags (
 Use the SQL CLI tool to generate your TOML configuration from the schema:
 
 ```bash
-uv run python -m render_engine_pg.cli.sql_cli schema.sql -o config.toml
+render-engine-pg sql schema.sql -o config.toml
 
-# Or with options
-uv run python -m render_engine_pg.cli.sql_cli schema.sql \
+# Or with options to ignore PRIMARY KEY and TIMESTAMP columns
+render-engine-pg sql schema.sql \
   --ignore-pk \
   --ignore-timestamps \
   -o config.toml
@@ -118,6 +118,103 @@ In your templates:
 </div>
 {% endif %}
 ```
+
+## Populating the Database from Markdown
+
+Once you've created your database schema and configuration, you can populate the database from markdown files using the populate command.
+
+### Basic Workflow
+
+1. **Create markdown files** with YAML frontmatter in a directory:
+
+```markdown
+---
+title: My First Post
+tags: [python, render-engine]
+---
+
+# My First Post
+
+This is the content of my first blog post.
+```
+
+2. **Set database connection**:
+
+```bash
+export CONNECTION_STRING="postgresql://user:password@localhost:5432/myblog"
+```
+
+3. **Run populate command**:
+
+```bash
+render-engine-pg populate blog content/blog/
+```
+
+### How Populate Works
+
+The populate command:
+
+1. Scans the directory for `.md` files
+2. For each file:
+   - Reads the YAML frontmatter as metadata
+   - Derives a slug from the filename (e.g., `my-first-post.md` → `my-first-post`)
+   - Executes the pre-configured `insert_sql` templates from `pyproject.toml`
+   - Inserts the metadata and content into the database
+
+### Markdown File Format
+
+Your markdown files should have YAML frontmatter with fields matching your database columns:
+
+```markdown
+---
+title: Post Title
+tags: [tag1, tag2]
+author: John Doe
+date: 2024-01-15
+---
+
+# Post Title
+
+Your content goes here...
+```
+
+The fields in the frontmatter become values for the SQL placeholders in your `insert_sql` templates.
+
+### Example Configuration
+
+Given this `pyproject.toml`:
+
+```toml
+[tool.render-engine.pg.insert_sql]
+blog = [
+    "INSERT INTO tags (name) VALUES ({tags}) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id;",
+    "INSERT INTO blog (slug, title, content, author) VALUES ({slug}, {title}, {content}, {author});"
+]
+```
+
+When you run:
+
+```bash
+render-engine-pg populate blog content/blog/
+```
+
+For each markdown file:
+- `{slug}` is derived from the filename
+- `{title}`, `{tags}`, `{author}` come from the frontmatter
+- `{content}` is the markdown body after frontmatter
+
+### Verbose Mode
+
+Get detailed information about what's being inserted:
+
+```bash
+render-engine-pg populate blog content/blog/ -v
+```
+
+This shows:
+- Found insert_sql templates
+- Processing each file
+- Success/failure for each insertion
 
 ## Real-World Examples
 

@@ -63,7 +63,13 @@ CREATE TABLE blog_tags (
 ### 2. Generate Configuration with CLI
 
 ```bash
-uv run python -m render_engine_pg.cli.sql_cli schema.sql -o config.toml
+render-engine-pg sql schema.sql -o config.toml
+```
+
+Or with options to automatically ignore PRIMARY KEY and TIMESTAMP columns:
+
+```bash
+render-engine-pg sql schema.sql --ignore-pk --ignore-timestamps -o config.toml
 ```
 
 This generates `config.toml` with `insert_sql` and `read_sql`. Merge into `pyproject.toml`.
@@ -167,7 +173,7 @@ class Products(Collection):
 Settings are read from `[tool.render-engine.pg]` in `pyproject.toml`. Generate this automatically with the CLI:
 
 ```bash
-uv run python -m render_engine_pg.cli.sql_cli schema.sql --ignore-pk --ignore-timestamps
+render-engine-pg sql schema.sql --ignore-pk --ignore-timestamps
 ```
 
 This creates:
@@ -316,10 +322,14 @@ render-engine-pg-parser/
 
 ## CLI Tools
 
+The render-engine-pg CLI provides two main commands:
+
+### SQL Configuration Generator
+
 Generate TOML configuration from SQL schema files:
 
 ```bash
-uv run python -m render_engine_pg.cli.sql_cli schema.sql -o config.toml
+render-engine-pg sql schema.sql -o config.toml
 ```
 
 **Options:**
@@ -329,17 +339,50 @@ uv run python -m render_engine_pg.cli.sql_cli schema.sql -o config.toml
 - `--ignore-pk` - Exclude PRIMARY KEY columns from INSERT statements
 - `--ignore-timestamps` - Exclude TIMESTAMP columns from INSERT statements
 - `--objects` - Filter by object types (collection, attribute, junction, page)
+- `--interactive` - Use interactive mode to manually classify unmarked tables
 
 **Example:**
 
 ```bash
-uv run python -m render_engine_pg.cli.sql_cli schema.sql \
+render-engine-pg sql schema.sql \
   --ignore-pk \
   --ignore-timestamps \
   -o config.toml
 ```
 
 This generates `insert_sql` and `read_sql` with proper dependency ordering and relationship handling.
+
+### Database Population
+
+Populate a PostgreSQL database from markdown files with YAML frontmatter:
+
+```bash
+export CONNECTION_STRING="postgresql://user:password@localhost/dbname"
+render-engine-pg populate blog content/
+```
+
+**Arguments:**
+
+- `table_name` - The database table name (e.g., blog, notes, microblog)
+- `content_path` - Path to directory containing markdown files
+
+**Options:**
+
+- `-v, --verbose` - Show detailed processing information
+
+**Example:**
+
+```bash
+export CONNECTION_STRING="postgresql://user:password@localhost/myblog"
+render-engine-pg populate blog ./content/blog/
+```
+
+The populate command will:
+1. Read each markdown file from the directory
+2. Extract YAML frontmatter metadata
+3. Derive slug from the filename (filename → slug)
+4. Execute pre-configured `insert_sql` templates from `pyproject.toml`
+5. Insert the markdown content and metadata into the database
 
 ## Examples
 
@@ -361,7 +404,7 @@ CREATE TABLE posts (
 **2. Generate config:**
 
 ```bash
-uv run python -m render_engine_pg.cli.sql_cli schema.sql --ignore-pk --ignore-timestamps
+render-engine-pg sql schema.sql --ignore-pk --ignore-timestamps
 ```
 
 **3. Define collection:**
