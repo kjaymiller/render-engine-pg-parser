@@ -426,9 +426,25 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
                         )
 
                     connection.commit()
+                except Exception:
+                    # Rollback on any error, then re-raise
+                    try:
+                        connection.rollback()
+                    except Exception:
+                        pass  # Connection may be in error state
+                    raise
                 finally:
                     # Restore original autocommit setting
-                    connection.autocommit = original_autocommit
+                    # If connection is in error state, reset it first
+                    try:
+                        connection.autocommit = original_autocommit
+                    except Exception:
+                        # If we can't restore autocommit, try to reset connection
+                        try:
+                            connection.rollback()
+                            connection.autocommit = original_autocommit
+                        except Exception:
+                            pass  # Connection is severely broken, will be handled upstream
 
         # Extract allowed columns from read_sql configuration for the main content INSERT
         # Only filter columns for the final main table INSERT, not for templates
@@ -490,9 +506,25 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
                         )
 
                 connection.commit()
+            except Exception:
+                # Rollback on any error, then re-raise
+                try:
+                    connection.rollback()
+                except Exception:
+                    pass  # Connection may be in error state
+                raise
             finally:
                 # Restore original autocommit setting
-                connection.autocommit = original_autocommit
+                # If connection is in error state, reset it first
+                try:
+                    connection.autocommit = original_autocommit
+                except Exception:
+                    # If we can't restore autocommit, try to reset connection
+                    try:
+                        connection.rollback()
+                        connection.autocommit = original_autocommit
+                    except Exception:
+                        pass  # Connection is severely broken, will be handled upstream
 
             result = insert_query.as_string(connection)
             return str(result)
