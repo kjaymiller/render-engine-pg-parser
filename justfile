@@ -13,6 +13,9 @@ typecheck:
 prerelease version:
     gh release create {{version}} --prerelease --generate-notes
 
+release version:
+    gh release create {{version}} --generate-notes
+
 review-pr number:
     gh pr diff {{number}} | delta
     gh pr view {{number}}
