@@ -71,6 +71,7 @@ class PostgresContentManager(ContentManager):
         if self._pages is None:
             self._pages = []
             for page in self.execute_query():
+                page._raw_content = page.content
                 page.content = self.collection.Parser.parse(page.content)
                 self._pages.append(page)
         yield from self._pages
