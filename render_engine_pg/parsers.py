@@ -316,7 +316,12 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
     @staticmethod
     def parse(content: str, extras: dict[str, Any] | None = None) -> str:
         """
-        Parse markdown content with default extras enabled.
+        Parse markdown content to HTML with default extras enabled.
+
+        This method is called by render-engine's Page._content property to convert
+        raw markdown to HTML during rendering. It should NOT be called manually
+        during the initial parsing phase (parse_content/parse_content_path).
+
         Ensures fenced code blocks and other common markdown features are available.
         """
         # Default markdown extras to enable fenced code blocks and other features
@@ -328,7 +333,7 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
         else:
             markdown_extras = default_extras
 
-        # Call parent class parse with the extras dict
+        # Call parent class parse with the extras dict to convert markdown to HTML
         result = MarkdownPageParser.parse(
             content,
             extras={"markdown_extras": markdown_extras}

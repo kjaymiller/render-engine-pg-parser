@@ -71,8 +71,9 @@ class PostgresContentManager(ContentManager):
         if self._pages is None:
             self._pages = []
             for page in self.execute_query():
-                page._raw_content = page.content
-                page.content = self.collection.Parser.parse(page.content)
+                # Don't manually parse content here - let render-engine's Page._content property
+                # handle parsing via Parser.parse() when the content is accessed for rendering.
+                # This prevents double-parsing (once here, once in Page._content property).
                 self._pages.append(page)
         yield from self._pages
 
