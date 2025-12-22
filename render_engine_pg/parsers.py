@@ -14,7 +14,7 @@ from psycopg import sql
 logger = logging.getLogger(__name__)
 
 
-class PGPageParser(BasePageParser):
+class PGPageParser(MarkdownPageParser):
     """Parser for individual Page objects querying the database
 
     Supports two modes of operation:
@@ -22,6 +22,26 @@ class PGPageParser(BasePageParser):
     2. Collection-based via PostgresQuery(connection=db, collection_name="blog")
        where the query is loaded from pyproject.toml settings
     """
+
+    @staticmethod
+    def parse(content: str, extras: dict[str, Any] | None = None) -> str:
+        """
+        Parse markdown content to HTML with default extras enabled.
+        """
+        # Default markdown extras to enable fenced code blocks and other features
+        default_extras = ["fenced-code-blocks", "tables", "footnotes"]
+
+        # If extras dict is provided, use its markdown_extras; otherwise use defaults
+        if extras and "markdown_extras" in extras:
+            markdown_extras = extras["markdown_extras"]
+        else:
+            markdown_extras = default_extras
+
+        # Call parent class parse with the extras dict to convert markdown to HTML
+        result = MarkdownPageParser.parse(
+            content, extras={"markdown_extras": markdown_extras}
+        )
+        return str(result)
 
     @staticmethod
     def parse_content_path(content_path: PostgresQuery) -> tuple:
@@ -111,7 +131,11 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
         import string
 
         formatter = string.Formatter()
-        field_names = [field_name for _, field_name, _, _ in formatter.parse(template) if field_name]
+        field_names = [
+            field_name
+            for _, field_name, _, _ in formatter.parse(template)
+            if field_name
+        ]
 
         # Check if all required fields are available
         for field in field_names:
@@ -194,10 +218,14 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
 
             try:
                 # Convert template to parameterized query for safe value substitution
-                param_query, values = PGMarkdownCollectionParser._convert_template_to_parameterized(
-                    insert_sql_template, frontmatter_data
+                param_query, values = (
+                    PGMarkdownCollectionParser._convert_template_to_parameterized(
+                        insert_sql_template, frontmatter_data
+                    )
                 )
-                logger.debug(f"Executing {phase} template: {param_query} with values {values}")
+                logger.debug(
+                    f"Executing {phase} template: {param_query} with values {values}"
+                )
                 cursor.execute(param_query, values)
             except KeyError as e:
                 # Rollback this specific query
@@ -209,8 +237,10 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
                 # Create another savepoint for list iteration attempt
                 cursor.execute(f"SAVEPOINT {savepoint_name}_list")
                 try:
-                    list_field_used = PGMarkdownCollectionParser._try_execute_with_list_iteration(
-                        cursor, insert_sql_template, frontmatter_data, missing_field
+                    list_field_used = (
+                        PGMarkdownCollectionParser._try_execute_with_list_iteration(
+                            cursor, insert_sql_template, frontmatter_data, missing_field
+                        )
                     )
                     if list_field_used:
                         # List iteration succeeded, release the savepoint
@@ -295,8 +325,10 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
 
                 try:
                     # Convert template to parameterized query
-                    param_query, values = PGMarkdownCollectionParser._convert_template_to_parameterized(
-                        template, test_data
+                    param_query, values = (
+                        PGMarkdownCollectionParser._convert_template_to_parameterized(
+                            template, test_data
+                        )
                     )
 
                     logger.debug(
@@ -335,8 +367,7 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
 
         # Call parent class parse with the extras dict to convert markdown to HTML
         result = MarkdownPageParser.parse(
-            content,
-            extras={"markdown_extras": markdown_extras}
+            content, extras={"markdown_extras": markdown_extras}
         )
         return str(result)
 
@@ -428,8 +459,10 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
 
                     with connection.cursor() as cur:
                         # Execute pre-main templates and get post-main templates for later
-                        post_main_templates = PGMarkdownCollectionParser._execute_templates_in_order(
-                            cur, connection, insert_sql_list, frontmatter_data
+                        post_main_templates = (
+                            PGMarkdownCollectionParser._execute_templates_in_order(
+                                cur, connection, insert_sql_list, frontmatter_data
+                            )
                         )
 
                     connection.commit()
@@ -462,18 +495,22 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
             if read_sql and isinstance(read_sql, str):
                 # Parse the SELECT statement to extract column names
                 # Look for columns between SELECT and FROM
-                select_match = re.search(r'SELECT\s+(?:DISTINCT\s+ON\s+\([^)]+\)\s+)?(.+?)\s+FROM', read_sql, re.IGNORECASE)
+                select_match = re.search(
+                    r"SELECT\s+(?:DISTINCT\s+ON\s+\([^)]+\)\s+)?(.+?)\s+FROM",
+                    read_sql,
+                    re.IGNORECASE,
+                )
                 if select_match:
                     select_clause = select_match.group(1)
                     # Split by comma and extract column names (handle table.column format)
                     col_names = []
-                    for col in select_clause.split(','):
+                    for col in select_clause.split(","):
                         col = col.strip()
                         # Remove aliases and table prefixes
-                        if ' as ' in col.lower():
-                            col = col.split(' as ')[-1].strip()
-                        if '.' in col:
-                            col = col.split('.')[-1].strip()
+                        if " as " in col.lower():
+                            col = col.split(" as ")[-1].strip()
+                        if "." in col:
+                            col = col.split(".")[-1].strip()
                         col_names.append(col)
                     allowed_columns = set(col_names)
 
@@ -481,7 +518,9 @@ class PGMarkdownCollectionParser(MarkdownPageParser):
         # Only include columns that exist in the main table (from read_sql)
         if allowed_columns:
             # Only include columns that are in the allowed set
-            filtered_data = {k: v for k, v in frontmatter_data.items() if k in allowed_columns}
+            filtered_data = {
+                k: v for k, v in frontmatter_data.items() if k in allowed_columns
+            }
         else:
             filtered_data = frontmatter_data
 
@@ -555,7 +594,7 @@ class PGFilePopulationParser(PGMarkdownCollectionParser):
         collection_name: str,
         table: str,
         extract_slug_from_filename: bool = True,
-        **extra_metadata: Any
+        **extra_metadata: Any,
     ) -> str:
         """
         Read a markdown file, extract metadata, and populate database.
@@ -586,8 +625,8 @@ class PGFilePopulationParser(PGMarkdownCollectionParser):
 
             # Clean up common date prefixes (e.g., "2020-01-15-my-post" -> "my-post")
             # This pattern matches YYYY-MM-DD- or YYYY-MM- prefixes
-            slug = re.sub(r'^\d{4}-\d{2}-\d{2}-', '', slug)
-            slug = re.sub(r'^\d{4}-\d{2}-', '', slug)
+            slug = re.sub(r"^\d{4}-\d{2}-\d{2}-", "", slug)
+            slug = re.sub(r"^\d{4}-\d{2}-", "", slug)
 
             post.metadata["slug"] = slug
 
@@ -604,7 +643,7 @@ class PGFilePopulationParser(PGMarkdownCollectionParser):
             content=updated_content,
             connection=connection,
             collection_name=collection_name,
-            table=table
+            table=table,
         )
 
     @staticmethod
@@ -615,7 +654,7 @@ class PGFilePopulationParser(PGMarkdownCollectionParser):
         table: str,
         pattern: str = "*.md",
         extract_slug_from_filename: bool = True,
-        **shared_metadata: Any
+        **shared_metadata: Any,
     ) -> list[str]:
         """
         Populate database from all markdown files in a directory.
@@ -643,7 +682,7 @@ class PGFilePopulationParser(PGMarkdownCollectionParser):
                     collection_name=collection_name,
                     table=table,
                     extract_slug_from_filename=extract_slug_from_filename,
-                    **shared_metadata
+                    **shared_metadata,
                 )
                 results.append(result)
 
