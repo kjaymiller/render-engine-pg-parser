@@ -1,5 +1,6 @@
 ---
 title: API Reference
+order: 4
 slug: api-reference
 layout: doc
 ---
@@ -604,4 +605,4 @@ print(result)
 # INSERT INTO posts (title, author, content, status) VALUES (%s, %s, %s, %s)
 ```
 
-Next, see [examples](./03-usage.md) for practical applications.
+Next, see the [Contributing Guide](./05-contributing.md) to help develop the project.

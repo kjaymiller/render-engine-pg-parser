@@ -34,7 +34,7 @@ class Docs(Collection):
     content_path = DOCS_DIR / "content" / "docs"
     template = "base.html"
     parser = MarkdownPageParser
-    sort_by = "title"
+    sort_by = "order"
     routes = ["docs/"]
 
 
@@ -66,6 +66,7 @@ Configuration-driven INSERT handling for the render-engine PostgreSQL plugin.
 - [Configuration](./docs/configuration/) - Configure insert_sql
 - [Usage Guide](./docs/usage/) - Real-world examples
 - [API Reference](./docs/api-reference/) - Complete API documentation
+- [Contributing](./docs/contributing/) - Development guide
 
 ## Installation
 
