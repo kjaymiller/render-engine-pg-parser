@@ -24,26 +24,6 @@ class PGPageParser(MarkdownPageParser):
     """
 
     @staticmethod
-    def parse(content: str, extras: dict[str, Any] | None = None) -> str:
-        """
-        Parse markdown content to HTML with default extras enabled.
-        """
-        # Default markdown extras to enable fenced code blocks and other features
-        default_extras = ["fenced-code-blocks", "tables", "footnotes"]
-
-        # If extras dict is provided, use its markdown_extras; otherwise use defaults
-        if extras and "markdown_extras" in extras:
-            markdown_extras = extras["markdown_extras"]
-        else:
-            markdown_extras = default_extras
-
-        # Call parent class parse with the extras dict to convert markdown to HTML
-        result = MarkdownPageParser.parse(
-            content, extras={"markdown_extras": markdown_extras}
-        )
-        return str(result)
-
-    @staticmethod
     def parse_content_path(content_path: PostgresQuery) -> tuple:
         """
         Parse a single row or multiple rows from a database query.
