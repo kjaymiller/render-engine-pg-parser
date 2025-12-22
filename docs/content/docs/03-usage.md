@@ -1,5 +1,6 @@
 ---
 title: Usage Guide
+order: 3
 slug: usage
 layout: doc
 ---
