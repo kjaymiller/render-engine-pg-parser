@@ -14,7 +14,7 @@ from pathlib import Path
 import click
 
 from render_engine_pg.connection import get_db_connection
-from render_engine_pg.parsers import PGFilePopulationParser
+from render_engine_pg.content_manager import PostgresContentManager
 from .cli_common import handle_cli_error, create_option_verbose
 
 
@@ -36,8 +36,7 @@ def main(table_name: str, content_path: Path, verbose: bool) -> None:
     # Configure logging based on verbose flag
     log_level = logging.DEBUG if verbose else logging.WARNING
     logging.basicConfig(
-        level=log_level,
-        format='%(name)s - %(levelname)s - %(message)s'
+        level=log_level, format="%(name)s - %(levelname)s - %(message)s"
     )
 
     try:
@@ -57,17 +56,23 @@ def main(table_name: str, content_path: Path, verbose: bool) -> None:
 
         # Load settings to show what will be executed
         from render_engine_pg.re_settings_parser import PGSettings
+
         settings = PGSettings()
         insert_sql = settings.get_insert_sql(table_name)
         read_sql = settings.get_read_sql(table_name)
 
         if verbose:
             if insert_sql:
-                click.echo(f"Found {len(insert_sql)} insert_sql templates for '{table_name}'", err=True)
+                click.echo(
+                    f"Found {len(insert_sql)} insert_sql templates for '{table_name}'",
+                    err=True,
+                )
                 for i, template in enumerate(insert_sql, 1):
                     click.echo(f"  Template {i}: {template[:80]}...", err=True)
             else:
-                click.echo(f"⚠ No insert_sql templates found for '{table_name}'", err=True)
+                click.echo(
+                    f"⚠ No insert_sql templates found for '{table_name}'", err=True
+                )
 
             if read_sql:
                 click.echo(f"Found read_sql for '{table_name}'", err=True)
@@ -94,7 +99,7 @@ def main(table_name: str, content_path: Path, verbose: bool) -> None:
                 if verbose:
                     click.echo(f"Processing {md_file.name}...", err=True)
 
-                PGFilePopulationParser.populate_from_file(
+                PostgresContentManager.populate_from_file(
                     file_path=md_file,
                     connection=conn,
                     collection_name=table_name,

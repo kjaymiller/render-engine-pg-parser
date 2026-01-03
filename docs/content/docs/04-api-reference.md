@@ -56,7 +56,8 @@ class Blog(Collection):
 1. On initialization, looks up `read_sql[collection_name]` in `pyproject.toml`
 2. Executes the SQL query against the database
 3. Yields a Page object for each result row
-4. All database columns become page attributes
+4. Uses the collection's parser (default: `MarkdownPageParser`) to parse the content
+5. All database columns become page attributes
 
 ### Alternative: Direct PostgresQuery
 

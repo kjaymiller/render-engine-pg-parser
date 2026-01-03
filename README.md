@@ -92,7 +92,6 @@ connection = get_db_connection(
 ```python
 from render_engine import Site, Collection
 from render_engine_pg.content_manager import PostgresContentManager
-from render_engine_pg.parsers import PGPageParser
 
 site = Site()
 
@@ -100,7 +99,6 @@ site = Site()
 class Blog(Collection):
     ContentManager = PostgresContentManager
     content_manager_extras = {"connection": connection}
-    parser = PGPageParser
     routes = ["blog/{slug}/"]
 ```
 
@@ -137,7 +135,6 @@ posts = "SELECT posts.*, array_agg(DISTINCT tags.name) as tag_names FROM posts L
 class Posts(Collection):
     ContentManager = PostgresContentManager
     content_manager_extras = {"connection": connection}
-    parser = PGPageParser
     routes = ["blog/{slug}/"]
 ```
 
@@ -150,7 +147,6 @@ class Posts(Collection):
 class Documentation(Collection):
     ContentManager = PostgresContentManager
     content_manager_extras = {"connection": connection}
-    parser = PGPageParser
     routes = ["docs/{slug}/"]
 ```
 
@@ -164,7 +160,6 @@ class Products(Collection):
         "connection": connection,
         "collection_name": "products"  # Override lookup name if needed
     }
-    parser = PGPageParser
     routes = ["products/{slug}/"]
 ```
 
@@ -225,8 +220,8 @@ See [DOCS.md](./DOCS.md) for documentation development guide.
 
 ### Core Components
 
-- **`PostgresContentManager`** - Fetches collection pages from database queries in `pyproject.toml`
-- **`PGPageParser`** - Parses database query results into page attributes
+- **`PostgresContentManager`** - Fetches collection pages from database queries in `pyproject.toml` using `psycopg`'s row factory to yield `PGPage` objects
+- **`PGPage`** - Custom Page object that dynamically accepts database columns as attributes
 - **`PGSettings`** - Loads configuration from `[tool.render-engine.pg]` in `pyproject.toml`
 - **CLI Tools** - Generate TOML configuration from SQL schema files
 - **Connection utilities** - PostgreSQL connection management
@@ -244,7 +239,7 @@ render-engine Collection
     ↓
 PostgresContentManager (loads read_sql query)
     ↓
-PGPageParser (parses database rows)
+PGPage (instantiated from row)
     ↓
 Generated static pages
 ```
@@ -289,7 +284,6 @@ render-engine-pg-parser/
 │   ├── __init__.py               # Package exports
 │   ├── connection.py             # Database connection utilities
 │   ├── page.py                   # Custom Page object
-│   ├── parsers.py                # Page parsers
 │   ├── content_manager.py        # Content manager
 │   ├── re_settings_parser.py     # Settings loader (NEW)
 │   └── cli/                      # Command-line tools
@@ -412,7 +406,6 @@ render-engine-pg sql schema.sql --ignore-pk --ignore-timestamps
 ```python
 from render_engine import Site, Collection
 from render_engine_pg.content_manager import PostgresContentManager
-from render_engine_pg.parsers import PGPageParser
 from render_engine_pg.connection import get_db_connection
 
 db = get_db_connection(
@@ -428,7 +421,6 @@ site = Site()
 class Posts(Collection):
     ContentManager = PostgresContentManager
     content_manager_extras = {"connection": db}
-    parser = PGPageParser
     routes = ["blog/{slug}/"]
 ```
 
@@ -439,14 +431,12 @@ class Posts(Collection):
 class Posts(Collection):
     ContentManager = PostgresContentManager
     content_manager_extras = {"connection": db}
-    parser = PGPageParser
     routes = ["blog/{slug}/"]
 
 @site.collection
 class Documentation(Collection):
     ContentManager = PostgresContentManager
     content_manager_extras = {"connection": db}
-    parser = PGPageParser
     routes = ["docs/{slug}/"]
 ```
 
@@ -575,7 +565,9 @@ Common commands:
 - Tests for new settings parser functionality
 
 #### Changed
-- Updated `PGMarkdownCollectionParser.create_entry()` to support `collection_name` parameter
+- Updated `PostgresContentManager` to use the collection's parser (`Collection.Parser` or `Collection.parser`), falling back to `MarkdownPageParser` if not specified.
+- `PGPageParser` now returns a dictionary with `data` containing all rows and `None` for content, fixing iteration issues in templates.
+- Updated `PostgresContentManager.create_entry()` to support `collection_name` parameter
 - Enhanced documentation structure
 
 ### [0.1.0] - Initial Release

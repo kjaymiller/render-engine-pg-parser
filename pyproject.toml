@@ -9,7 +9,7 @@ description = "A PostgreSQL parser for the Render Engine"
 requires-python = ">=3.11"
 dependencies = [
   "psycopg[binary]>=3.0",
-  "render-engine>=2025.11.1a1",
+  "render-engine>=2026.1.1a1",
   "python-frontmatter>=1.0",
   "render-engine-markdown>=2023.12.1",
   "click>=8.3.0",
