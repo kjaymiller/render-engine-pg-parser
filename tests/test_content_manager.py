@@ -322,8 +322,8 @@ class TestPostgresContentManagerCreateEntry:
 
 
 class TestPostgresContentManagerExecution:
-    def test_execute_query_sets_markdown_parser(self):
-        """Test that execute_query sets the MarkdownPageParser on yielded pages."""
+    def test_execute_query_sets_collection_parser(self):
+        """Test that execute_query sets the parser from the collection on yielded pages."""
         # Setup mocks
         mock_connection = MagicMock()
         mock_cursor = MagicMock()
@@ -337,7 +337,14 @@ class TestPostgresContentManagerExecution:
             connection=mock_connection, query="SELECT * FROM posts"
         )
 
+        # Create a specific MockParser to verify
+        class CustomMockParser:
+            pass
+
         mock_collection = MagicMock()
+        # Set the parser on the collection (simulate render_engine collection)
+        mock_collection.Parser = CustomMockParser
+        mock_collection.parser = CustomMockParser  # Set both to be safe/realistic
 
         content_manager = PostgresContentManager(
             collection=mock_collection, postgres_query=postgres_query
@@ -349,4 +356,4 @@ class TestPostgresContentManagerExecution:
         # Verify
         assert len(pages) == 1
         page = pages[0]
-        assert page.Parser == MarkdownPageParser
+        assert page.Parser == CustomMockParser

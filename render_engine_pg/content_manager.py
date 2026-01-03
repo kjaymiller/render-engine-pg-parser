@@ -67,7 +67,11 @@ class PostgresContentManager(ContentManager):
             if self.postgres_query.query is not None:
                 cur.execute(self.postgres_query.query)
             for row in cur:
-                row.Parser = MarkdownPageParser
+                row.Parser = getattr(
+                    self.collection,
+                    "Parser",
+                    getattr(self.collection, "parser", MarkdownPageParser),
+                )
                 row.parser_extras = getattr(self.collection, "parser_extras", {})
                 row.routes = self.collection.routes
                 row.template = getattr(self.collection, "template", None)
