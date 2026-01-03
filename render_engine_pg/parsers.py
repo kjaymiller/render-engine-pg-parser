@@ -7,7 +7,7 @@ from psycopg.rows import dict_row
 class PGPageParser(BasePageParser):
     @staticmethod
     def parse_content(data):
-        return data, data.get("content")
+        return {"data": data}, None
 
     @staticmethod
     def parse_content_path(content_path):
@@ -25,6 +25,6 @@ class PGPageParser(BasePageParser):
 
             with content_path.connection.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(query)
-                return PGPageParser.parse_content(cursor.fetchone())
+                return PGPageParser.parse_content(cursor.fetchall())
 
         return BasePageParser.parse_content_path(content_path)
