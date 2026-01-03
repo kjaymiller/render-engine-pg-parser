@@ -565,6 +565,8 @@ Common commands:
 - Tests for new settings parser functionality
 
 #### Changed
+- Updated `PostgresContentManager` to use the collection's parser (`Collection.Parser` or `Collection.parser`), falling back to `MarkdownPageParser` if not specified.
+- `PGPageParser` now returns a dictionary with `data` containing all rows and `None` for content, fixing iteration issues in templates.
 - Updated `PostgresContentManager.create_entry()` to support `collection_name` parameter
 - Enhanced documentation structure
 

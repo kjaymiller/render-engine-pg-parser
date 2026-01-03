@@ -84,7 +84,7 @@ class Blog(Collection):
     ContentManager = PostgresContentManager
     content_manager_extras = {"connection": connection}
 
-    parser = PGPageParser
+    # parser = PGPageParser # Optional: Uses MarkdownPageParser by default
     routes = ["blog/{slug}/"]
 ```
 
@@ -92,6 +92,7 @@ The `ContentManager` automatically:
 - Looks up `read_sql['blog']` from `pyproject.toml`
 - Executes the query against your database
 - Yields a Page object for each row
+- Uses the collection's parser (defaults to `MarkdownPageParser`)
 - Makes all columns available as page attributes
 
 ## Key Features
