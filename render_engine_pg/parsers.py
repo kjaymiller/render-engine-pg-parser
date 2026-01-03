@@ -1,7 +1,7 @@
 from render_engine.page import BasePageParser
 
 
-class PGParser(BasePageParser):
+class PGPageParser(BasePageParser):
     @staticmethod
     def parse_content(data):
-        return {}, data
+        return data, data.get("content")

@@ -1,17 +1,17 @@
-from render_engine_pg.parsers import PGParser
+from render_engine_pg.parsers import PGPageParser
 
 
 def test_pg_parser_content():
-    # Simple content
-    content = "some content"
-    attrs, result_content = PGParser.parse_content(content)
-    assert attrs == {}
-    assert result_content == content
+    # Content as dict
+    data = {"title": "Hello", "content": "some content"}
+    attrs, result_content = PGPageParser.parse_content(data)
+    assert attrs == data
+    assert result_content == "some content"
 
 
-def test_pg_parser_with_frontmatter():
-    # Content with frontmatter
-    content_with_fm = "---\ntitle: foo\n---\nbar"
-    attrs, result_content = PGParser.parse_content(content_with_fm)
-    assert attrs == {}
-    assert result_content == content_with_fm
+def test_pg_parser_with_no_content_field():
+    # Content dict without content field
+    data = {"title": "foo"}
+    attrs, result_content = PGPageParser.parse_content(data)
+    assert attrs == data
+    assert result_content is None
