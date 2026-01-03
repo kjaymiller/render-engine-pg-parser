@@ -422,7 +422,7 @@ wheels = [
 
 [[package]]
 name = "render-engine"
-version = "2025.11.1a1"
+version = "2026.1.1a1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jinja2" },
@@ -436,9 +436,9 @@ dependencies = [
     { name = "render-engine-parser" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/01/01/5e92c1be8aab18edaf7ee7e16279e8db0da9e6f75b215e8055d5a8a452e3/render_engine-2025.11.1a1.tar.gz", hash = "sha256:9783417cd94f03bd69a81dd39dd2b63c5eade3dc483a2b175e12370c00979826", size = 11887631, upload-time = "2025-11-03T17:49:33.265Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/14/5674de3ba401b5b1c450a551d5b78090a7243f838ed4aff4c7a9fac4f260/render_engine-2026.1.1a1.tar.gz", hash = "sha256:a9ab28d356c09a0060033ea5c744db1c4c51f1c1ed1e6113a65c8e91d5e1da45", size = 11888935, upload-time = "2026-01-02T02:21:24.465Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/35/a5/0ca1e977dce22c4de65fe1abc54c197927e58ee523e9c0b2846e3c7ee093/render_engine-2025.11.1a1-py3-none-any.whl", hash = "sha256:e8ab94f039f6d8f4f85700645dcb51c32b1c6e0983ff393e1e5a336ed8bf5fe8", size = 34369, upload-time = "2025-11-03T17:49:31.284Z" },
+    { url = "https://files.pythonhosted.org/packages/d1/4e/fa207b20b445534173dbeda90b5ffb53e0b259504c04fa3caecf8ad60285/render_engine-2026.1.1a1-py3-none-any.whl", hash = "sha256:f547bfa26c679fdf9c4caa7b66830ee62b6f0aff9c953e5219bed831d215c860", size = 34742, upload-time = "2026-01-02T02:21:22.734Z" },
 ]
 
 [[package]]
@@ -493,7 +493,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'test'", specifier = ">=7.0" },
     { name = "pytest-mock", marker = "extra == 'test'", specifier = ">=3.10" },
     { name = "python-frontmatter", specifier = ">=1.0" },
-    { name = "render-engine", specifier = ">=2025.11.1a1" },
+    { name = "render-engine", specifier = ">=2026.1.1a1" },
     { name = "render-engine-markdown", specifier = ">=2023.12.1" },
     { name = "tomli-w", specifier = ">=1.0.0" },
 ]
