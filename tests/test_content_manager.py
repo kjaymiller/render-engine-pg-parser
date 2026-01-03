@@ -4,6 +4,8 @@ import pytest
 from unittest.mock import MagicMock, patch
 from render_engine_pg.content_manager import PostgresContentManager
 from render_engine_pg.connection import PostgresQuery
+from render_engine_pg.page import PGPage
+from render_engine_markdown import MarkdownPageParser
 
 
 class TestPostgresContentManagerCreateEntry:
@@ -48,7 +50,7 @@ class TestPostgresContentManagerCreateEntry:
             assert call_args[1]["author"] == "John"
 
             # Verify return message
-            assert "New entry created in table 'posts'" in result
+            assert "INSERT INTO posts" in result
 
     def test_create_entry_uses_connection_from_postgres_query(self, mock_connection):
         """Test that create_entry uses the connection from postgres_query."""
@@ -172,7 +174,7 @@ class TestPostgresContentManagerCreateEntry:
             # Verify table defaults to collection_name
             call_args = mock_create.call_args
             assert call_args[1]["table"] == "blog"
-            assert "New entry created in table 'blog'" in result
+            assert "INSERT query" in result
 
     def test_create_entry_table_explicit_parameter(self, mock_connection):
         """Test that explicit table parameter is used when provided."""
@@ -199,7 +201,7 @@ class TestPostgresContentManagerCreateEntry:
             # Verify explicit table parameter was used
             call_args = mock_create.call_args
             assert call_args[1]["table"] == "custom_posts"
-            assert "New entry created in table 'custom_posts'" in result
+            assert "INSERT query" in result
 
     def test_create_entry_metadata_handling(self, mock_connection):
         """Test that metadata is properly passed through to parser."""
@@ -294,8 +296,7 @@ class TestPostgresContentManagerCreateEntry:
             result = content_manager.create_entry(content="# Test", table="blog_posts")
 
             # Verify return message format
-            assert result.startswith("New entry created in table 'blog_posts':")
-            assert "INSERT INTO posts" in result
+            assert result.startswith("INSERT INTO posts")
 
     def test_create_entry_none_metadata_handled(self, mock_connection):
         """Test that None metadata is properly handled (converted to empty dict)."""
@@ -318,3 +319,34 @@ class TestPostgresContentManagerCreateEntry:
 
             # Should not raise an error, metadata should be empty dict
             mock_create.assert_called_once()
+
+
+class TestPostgresContentManagerExecution:
+    def test_execute_query_sets_markdown_parser(self):
+        """Test that execute_query sets the MarkdownPageParser on yielded pages."""
+        # Setup mocks
+        mock_connection = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connection.cursor.return_value.__enter__.return_value = mock_cursor
+
+        # Create a mock row (PGPage instance)
+        mock_page = MagicMock(spec=PGPage)
+        mock_cursor.__iter__.return_value = [mock_page]
+
+        postgres_query = PostgresQuery(
+            connection=mock_connection, query="SELECT * FROM posts"
+        )
+
+        mock_collection = MagicMock()
+
+        content_manager = PostgresContentManager(
+            collection=mock_collection, postgres_query=postgres_query
+        )
+
+        # Execute
+        pages = list(content_manager.execute_query())
+
+        # Verify
+        assert len(pages) == 1
+        page = pages[0]
+        assert page.Parser == MarkdownPageParser

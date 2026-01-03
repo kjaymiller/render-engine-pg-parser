@@ -7,6 +7,7 @@ from typing import Generator, Iterable, Optional, Any
 from psycopg import sql
 from psycopg.rows import class_row
 from render_engine.content_managers import ContentManager
+from render_engine_markdown import MarkdownPageParser
 from render_engine_pg.connection import PostgresQuery
 from render_engine_pg.page import PGPage
 from render_engine_pg.re_settings_parser import PGSettings
@@ -66,6 +67,7 @@ class PostgresContentManager(ContentManager):
             if self.postgres_query.query is not None:
                 cur.execute(self.postgres_query.query)
             for row in cur:
+                row.Parser = MarkdownPageParser
                 row.parser_extras = getattr(self.collection, "parser_extras", {})
                 row.routes = self.collection.routes
                 row.template = getattr(self.collection, "template", None)
