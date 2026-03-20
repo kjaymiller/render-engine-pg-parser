@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from render_engine.page import Page
 from render_engine.themes import ThemeManager
 
@@ -21,6 +19,6 @@ class PGPage(Page):
         for key, value in kwargs.items():
             setattr(self, key, value)
 
-    def render(self, route: str | Path, theme_manager: ThemeManager) -> int:
-        result = super().render(route=route, theme_manager=theme_manager)
+    def render(self, theme_manager: ThemeManager) -> int:
+        result = super().render(theme_manager=theme_manager)
         return result if isinstance(result, int) else 0
