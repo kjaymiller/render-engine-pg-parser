@@ -89,6 +89,10 @@ class PostgresContentManager(ContentManager):
                 self._pages.append(page)
         yield from self._pages
 
+    @pages.setter
+    def pages(self, value: Iterable) -> None:
+        self._pages = list(value)
+
     def __iter__(self):
         yield from self.pages
 
@@ -456,6 +460,15 @@ class PostgresContentManager(ContentManager):
             **metadata,
             **kwargs,
         )
+
+    def update_entry(
+        self,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Update an existing database entry.
+        """
+        pass
 
     @staticmethod
     def populate_from_file(
