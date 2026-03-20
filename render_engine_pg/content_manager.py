@@ -457,6 +457,15 @@ class PostgresContentManager(ContentManager):
             **kwargs,
         )
 
+    def update_entry(
+        self,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Update an existing database entry.
+        """
+        pass
+
     @staticmethod
     def populate_from_file(
         file_path: str | Path,
